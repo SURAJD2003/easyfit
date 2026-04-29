@@ -2989,6 +2989,38 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     );
   }
 
+  // ── STEP PHASE HELPER ──────────────────────────────────
+  /// Returns the phase name and next-phase info based on current step count.
+  /// Phases:
+  ///   0 – 5000     → Activation Phase
+  ///   5001 – 7000  → Fat Loss Phase
+  ///   7001 – 10000 → Metabolic Phase
+  ///  10001 – 12000 → Transformation Phase
+  ///  12000+        → Limit Zone
+  static String _getPhaseName(int steps) {
+    if (steps <= 5000) return 'Activation';
+    if (steps <= 7000) return 'Fat Loss';
+    if (steps <= 10000) return 'Metabolic';
+    if (steps <= 12000) return 'Transformation';
+    return 'Limit Zone';
+  }
+
+  static String? _getNextPhaseName(int steps) {
+    if (steps <= 5000) return 'Fat Loss';
+    if (steps <= 7000) return 'Metabolic';
+    if (steps <= 10000) return 'Transformation';
+    if (steps <= 12000) return 'Limit Zone';
+    return null; // already at max
+  }
+
+  static int _stepsToNextPhase(int steps) {
+    if (steps <= 5000) return 5001 - steps;
+    if (steps <= 7000) return 7001 - steps;
+    if (steps <= 10000) return 10001 - steps;
+    if (steps <= 12000) return 12001 - steps;
+    return 0;
+  }
+
   // ── HERO CARD ────────────────────────────────────────────
   Widget _heroCard(DashboardState state, int sessionSteps) {
     var rawCalories = state.todayActivity?['calories'] ?? 0.0;
@@ -3011,6 +3043,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     
     final goal = state.todayActivity?['goal'] ?? state.todayActivity?['goalSteps'] ?? 7000;
     final progress = (steps / goal).clamp(0.0, 1.0);
+    final phaseName = _getPhaseName(steps);
     
     return Padding(
       padding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
@@ -3049,7 +3082,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 7),
                             decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFFF6B2B), Color(0xFFFF9A3C)]), borderRadius: BorderRadius.circular(20)),
-                            child: Text('Fat Loss', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
+                            child: Text(phaseName, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
                           ),
                           const SizedBox(height: 8),
                           Text('Goal: ${goal}', style: GoogleFonts.inter(fontSize: 12, color: _T.mid)),
@@ -3164,6 +3197,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     const doneIndices = [0, 1, 2, 3];
     const currentIndex = 3;
 
+    // Get current steps for phase calculation
+    final state = ref.watch(dashboardProvider);
+    final apiSteps = (state.todayActivity?['steps'] ?? 0) as int;
+    final liveSteps = ref.watch(pedometerProvider).valueOrNull ?? 0;
+    final currentSteps = [apiSteps, liveSteps, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
+    final currentPhase = _getPhaseName(currentSteps);
+    final nextPhase = _getNextPhaseName(currentSteps);
+    final remaining = _stepsToNextPhase(currentSteps);
+    final streakSubtitle = nextPhase != null
+        ? 'Keep it up! $remaining steps to $nextPhase'
+        : '🔥 You\'re in the Limit Zone!';
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 22),
       child: AnimatedBuilder(
@@ -3196,9 +3241,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   ),
                   const SizedBox(width: 12),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('3 Days Streak', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: _T.hi)),
+                    Text('$currentPhase Phase', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: _T.hi)),
                     const SizedBox(height: 3),
-                    Text('Keep it up! 2 days to Fat Loss Badge', style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
+                    Text(streakSubtitle, style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
                   ])),
                   const SizedBox(width: 12),
                   GestureDetector(
@@ -3216,9 +3261,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                         child: Column(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
                           Icon(Icons.local_fire_department_rounded, color: _T.accent, size: 20),
                           const SizedBox(height: 4),
-                          Text('FAT LOSS', textAlign: TextAlign.center, style: GoogleFonts.inter(fontSize: 8, fontWeight: FontWeight.w800, color: _T.accent, letterSpacing: 0.4, height: 1.2)),
+                          Text(currentPhase.toUpperCase(), textAlign: TextAlign.center, style: GoogleFonts.inter(fontSize: 8, fontWeight: FontWeight.w800, color: _T.accent, letterSpacing: 0.4, height: 1.2)),
                           const SizedBox(height: 4),
-                          Text('+300 XP', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700, color: _T.gold)),
+                          Text(nextPhase != null ? '+${(remaining * 0.045).round()} cal' : '🔥 MAX', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700, color: _T.gold)),
                         ]),
                       ),
                     ),

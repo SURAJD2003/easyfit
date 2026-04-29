@@ -195,19 +195,8 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
       return ['TODAY'];
     }
     if (_tabIndex == 1) {
-      // Week: last 8 weeks — THIS WEEK first, then older
-      DateTime ws = now.subtract(Duration(days: now.weekday - 1)); // this week's Monday
-      final List<String> pills = [];
-      for (int i = 0; i < 8; i++) {
-        final we = ws.add(const Duration(days: 6));
-        if (i == 0) {
-          pills.add('THIS WEEK');
-        } else {
-          pills.add('${DateFormat('d MMM').format(ws).toUpperCase()} – ${DateFormat('d MMM').format(we).toUpperCase()}');
-        }
-        ws = ws.subtract(const Duration(days: 7));
-      }
-      return pills;
+      // Last 7 days — single pill, no date picker
+      return ['LAST 7 DAYS'];
     }
     // Month: current month first, then older
     final months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -226,13 +215,10 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
       return;
     }
     if (_tabIndex == 1) {
-      // Week: calculate which week is selected
-      // pills go: [THIS WEEK, 1 week ago, 2 weeks ago, ...]
-      final weeksBack = _selectedPeriod;
-      DateTime ws = now.subtract(Duration(days: now.weekday - 1)); // this Monday
-      ws = ws.subtract(Duration(days: 7 * weeksBack));
-      final we = ws.add(const Duration(days: 6));
-      notifier.fetchWeeklyStats(ws, we);
+      // Last 7 days: always fetch the last 7 days from today
+      final end = now;
+      final start = now.subtract(const Duration(days: 6));
+      notifier.fetchWeeklyStats(start, end);
       return;
     }
     // Month: pills go [current month, previous, ...]
@@ -246,8 +232,9 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
   double get _totalSteps {
     if (_tabIndex == 0) return _todaySteps.toDouble();
     if (_tabIndex == 1) {
+      // Show average steps for Last 7 Days
       final weekly = ref.watch(dashboardProvider).weeklyStats;
-      return ((weekly?['totalSteps'] ?? 0) as num).toDouble();
+      return ((weekly?['avgStepsPerDay'] ?? 0) as num).toDouble();
     }
     // Month: use API totalSteps
     final monthly = ref.watch(dashboardProvider).monthlyStats;
@@ -255,6 +242,10 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
   }
   double get _totalDist {
     if (_tabIndex == 0) return _todayDistance;
+    if (_tabIndex == 1) {
+      // Average distance for Last 7 Days
+      return _totalSteps * 0.000762;
+    }
     if (_tabIndex == 2) {
       return _totalSteps * 0.000762;
     }
@@ -263,8 +254,11 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
   int get _totalCals {
     if (_tabIndex == 0) return _todayCalories.round();
     if (_tabIndex == 1) {
+      // Average calories for Last 7 Days
       final weekly = ref.watch(dashboardProvider).weeklyStats;
-      return ((weekly?['totalCalories'] ?? 0) as num).round();
+      final totalCal = ((weekly?['totalCalories'] ?? 0) as num).toDouble();
+      final days = (weekly?['days'] as List?)?.length ?? 7;
+      return days > 0 ? (totalCal / days).round() : 0;
     }
     // Month: use API totalCalories
     final monthly = ref.watch(dashboardProvider).monthlyStats;
@@ -488,7 +482,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
 
   // ── TAB ROW ──
   Widget _tabRow() {
-    final tabs = ['Day', 'Week', 'Month'];
+    final tabs = ['Day', 'Last 7 Days', 'Month'];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 22),
       child: Row(
@@ -558,16 +552,21 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
   }
 
   // ── 3 STAT CARDS ──
+  // Labels change to "Avg" prefix for the Last 7 Days tab
+  String get _stepsLabel => _tabIndex == 1 ? 'Avg Steps' : 'Steps';
+  String get _distLabel  => _tabIndex == 1 ? 'Avg Dist (km)' : 'Distance (km)';
+  String get _calsLabel  => _tabIndex == 1 ? 'Avg Calories' : 'Calories';
+
   Widget _statCards() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 22),
       child: Row(
         children: [
-          _statCard(0, _stepsStr, 'Steps',         _T.accent),
+          _statCard(0, _stepsStr, _stepsLabel,  _T.accent),
           const SizedBox(width: 10),
-          _statCard(1, _distStr,  'Distance (km)', _T.blue),
+          _statCard(1, _distStr,  _distLabel,   _T.blue),
           const SizedBox(width: 10),
-          _statCard(2, _calsStr,  'Calories',      _T.green),
+          _statCard(2, _calsStr,  _calsLabel,   _T.green),
         ],
       ),
     );
