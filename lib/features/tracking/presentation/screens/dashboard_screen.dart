@@ -2416,7 +2416,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   bool _shareLoading = false;
 
   Widget _reportsTab() {
-    final segments = ['Day', 'Week', 'Month'];
+    final segments = ['Day', 'Last 7 Days', 'Month'];
     final shareTypes = ['daily', 'weekly', 'monthly'];
 
     // Date subtitle for current segment
@@ -2426,9 +2426,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         dateSubtitle = DateFormat('EEEE, d MMMM yyyy').format(_reportDate);
         break;
       case 1:
-        final weekStart = _reportDate.subtract(Duration(days: _reportDate.weekday - 1));
-        final weekEnd = weekStart.add(const Duration(days: 6));
-        dateSubtitle = '${DateFormat('d MMM').format(weekStart)} – ${DateFormat('d MMM').format(weekEnd)}, ${_reportDate.year}';
+        // Last 7 days — always relative to today, no date picker
+        final last7Start = DateTime.now().subtract(const Duration(days: 6));
+        final last7End = DateTime.now();
+        dateSubtitle = '${DateFormat('d MMM').format(last7Start)} – ${DateFormat('d MMM').format(last7End)}, ${last7End.year}';
         break;
       default:
         dateSubtitle = DateFormat('MMMM yyyy').format(_reportDate);
@@ -2473,39 +2474,53 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           ),
           const SizedBox(height: 14),
 
-          // Date picker
-          GestureDetector(
-            onTap: () async {
-              final picked = await showDatePicker(
-                context: context,
-                initialDate: _reportDate,
-                firstDate: DateTime(2024),
-                lastDate: DateTime.now(),
-                builder: (ctx, child) => Theme(
-                  data: ThemeData.dark().copyWith(
-                    colorScheme: const ColorScheme.dark(primary: Color(0xFFFF6B2B), onPrimary: Colors.white, surface: Color(0xFF141414), onSurface: Colors.white),
-                    dialogBackgroundColor: const Color(0xFF141414),
+          // Date picker — hidden for "Last 7 Days" (always uses today - 6 days)
+          if (_reportSegment != 1)
+            GestureDetector(
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _reportDate,
+                  firstDate: DateTime(2024),
+                  lastDate: DateTime.now(),
+                  builder: (ctx, child) => Theme(
+                    data: ThemeData.dark().copyWith(
+                      colorScheme: const ColorScheme.dark(primary: Color(0xFFFF6B2B), onPrimary: Colors.white, surface: Color(0xFF141414), onSurface: Colors.white),
+                      dialogBackgroundColor: const Color(0xFF141414),
+                    ),
+                    child: child!,
                   ),
-                  child: child!,
+                );
+                if (picked != null) {
+                  setState(() { _reportDate = picked; _reportData = null; });
+                }
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(color: _T.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: _T.divider)),
+                child: Row(
+                  children: [
+                    const Icon(Icons.calendar_today_rounded, color: _T.accent, size: 18),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text(dateSubtitle, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: _T.hi))),
+                    const Icon(Icons.chevron_right_rounded, color: _T.mid, size: 20),
+                  ],
                 ),
-              );
-              if (picked != null) {
-                setState(() { _reportDate = picked; _reportData = null; });
-              }
-            },
-            child: Container(
+              ),
+            ),
+          // "Last 7 Days" static label
+          if (_reportSegment == 1)
+            Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(color: _T.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: _T.divider)),
+              decoration: BoxDecoration(color: _T.accent.withOpacity(0.08), borderRadius: BorderRadius.circular(16), border: Border.all(color: _T.accent.withOpacity(0.2))),
               child: Row(
                 children: [
-                  const Icon(Icons.calendar_today_rounded, color: _T.accent, size: 18),
+                  const Icon(Icons.date_range_rounded, color: _T.accent, size: 18),
                   const SizedBox(width: 12),
-                  Expanded(child: Text(dateSubtitle, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: _T.hi))),
-                  const Icon(Icons.chevron_right_rounded, color: _T.mid, size: 20),
+                  Expanded(child: Text(dateSubtitle, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: _T.accent))),
                 ],
               ),
             ),
-          ),
           const SizedBox(height: 12),
 
           // Fetch + Share buttons row
@@ -2587,9 +2602,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           data = await ds.getDailyReport(dateStr);
           break;
         case 1:
-          final weekStart = _reportDate.subtract(Duration(days: _reportDate.weekday - 1));
-          final weekStr = DateFormat('yyyy-MM-dd').format(weekStart);
-          debugPrint('📡 WEEKLY → GET /reports/weekly?week=$weekStr');
+          // Last 7 Days — always use today minus 6 days
+          final last7Start = DateTime.now().subtract(const Duration(days: 6));
+          final weekStr = DateFormat('yyyy-MM-dd').format(last7Start);
+          debugPrint('📡 WEEKLY (Last 7 Days) → GET /reports/weekly?week=$weekStr');
           data = await ds.getWeeklyReport(weekStr);
           break;
         default:
@@ -2634,9 +2650,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         dateLabel = DateFormat('EEEE, d MMMM yyyy').format(_reportDate);
         break;
       case 1:
-        final weekStart = _reportDate.subtract(Duration(days: _reportDate.weekday - 1));
-        final weekEnd = weekStart.add(const Duration(days: 6));
-        dateLabel = '${DateFormat('d MMM').format(weekStart)} \u2013 ${DateFormat('d MMM').format(weekEnd)}, ${_reportDate.year}';
+        final shareStart = DateTime.now().subtract(const Duration(days: 6));
+        final shareEnd = DateTime.now();
+        dateLabel = '${DateFormat('d MMM').format(shareStart)} \u2013 ${DateFormat('d MMM').format(shareEnd)}, ${shareEnd.year}';
         break;
       default:
         dateLabel = DateFormat('MMMM yyyy').format(_reportDate);
@@ -2791,11 +2807,27 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         ]),
       ),
       const SizedBox(height: 16),
-      Row(children: [
-        Expanded(child: _statSummaryCard(icon: Icons.directions_walk_rounded, value: _formatSteps(totalSteps), label: 'Total Steps', color: _T.green)),
-        const SizedBox(width: 12),
-        Expanded(child: _statSummaryCard(icon: Icons.local_fire_department_rounded, value: totalCalories.toString(), label: 'Total Calories', color: _T.accent)),
-      ]),
+      // Show averages for Last 7 Days
+      () {
+        final dayCount = dailyData.isNotEmpty ? dailyData.length : 7;
+        final avgSteps = dayCount > 0 ? (totalSteps / dayCount).round() : 0;
+        final avgCals = dayCount > 0 ? (totalCalories / dayCount).round() : 0;
+        // Count days where any habit/tablet was taken (fallback: count active days)
+        final activeDays = dailyData.where((d) => ((d as Map)['steps'] ?? 0) > 0).length;
+        return Column(children: [
+          Row(children: [
+            Expanded(child: _statSummaryCard(icon: Icons.directions_walk_rounded, value: _formatSteps(avgSteps), label: 'Avg Steps', color: _T.green)),
+            const SizedBox(width: 12),
+            Expanded(child: _statSummaryCard(icon: Icons.local_fire_department_rounded, value: avgCals.toString(), label: 'Avg Calories', color: _T.accent)),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: _statSummaryCard(icon: Icons.medication_rounded, value: '$activeDays / $dayCount', label: 'Avg Tablets', color: _T.blue)),
+            const SizedBox(width: 12),
+            Expanded(child: _statSummaryCard(icon: Icons.directions_walk_rounded, value: _formatSteps(totalSteps), label: 'Total Steps', color: _T.purple)),
+          ]),
+        ]);
+      }(),
       const SizedBox(height: 20),
       Text('Daily Breakdown', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: _T.hi)),
       const SizedBox(height: 12),
