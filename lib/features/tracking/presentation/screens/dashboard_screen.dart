@@ -2559,10 +2559,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           ),
           const SizedBox(height: 24),
 
-          // Report content
           // Report content (wrapped in RepaintBoundary for screenshot capture)
-          // Only show the branded card for Day and Month reports; Last 7 Days shows avg cards directly
-          if (_reportData != null && _reportSegment != 1)
+          if (_reportData != null)
             RepaintBoundary(
               key: _reportCardKey,
               child: ShareableReportCard(
@@ -2572,7 +2570,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 segment: _reportSegment,
               ),
             ),
-          if (_reportData != null && _reportSegment != 1) const SizedBox(height: 16),
+          if (_reportData != null) const SizedBox(height: 16),
           if (_reportData != null) ..._buildReportContent(),
           if (_reportData == null && !_reportLoading)
             Container(
