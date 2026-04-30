@@ -3263,18 +3263,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     }
     streakDays = streakDays.clamp(1, 7);
 
-    // Build day labels: start from the streak start date, go 7 days forward
+    // Build day labels: last 7 days ending at today (today = rightmost)
     final allDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    final streakStartDate = DateTime.now().subtract(Duration(days: streakDays - 1));
     final dayLabels = List.generate(7, (i) {
-      final d = streakStartDate.add(Duration(days: i));
+      final d = DateTime.now().subtract(Duration(days: 6 - i));
       return allDays[d.weekday % 7];
     });
 
-    // Today's index in the 7-dot row
-    final currentIndex = streakDays - 1; // 0-based position of today
-    // Mark all days from start up to today as done
-    final doneIndices = List.generate(streakDays, (i) => i);
+    // Today is always the last dot (index 6)
+    const currentIndex = 6;
+    // Mark streak days: count backwards from today (index 6)
+    final doneIndices = List.generate(streakDays, (i) => 6 - i);
 
     final streakSubtitle = nextPhase != null
         ? '$streakDays day streak! $remaining steps to $nextPhase'
