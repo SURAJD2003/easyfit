@@ -270,13 +270,19 @@ class ReportShareUtils {
     final totalSteps = d['totalSteps'] ?? 0;
     final totalCals = d['totalCalories'] ?? 0;
     final daily = (d['dailyData'] as List<dynamic>?) ?? [];
+    final dayCount = daily.isNotEmpty ? daily.length : 7;
+    final avgSteps = dayCount > 0 ? (totalSteps / dayCount).round() : 0;
+    final avgCals = dayCount > 0 ? (totalCals / dayCount).round() : 0;
+    final activeDays = daily.where((d) => ((d as Map)['steps'] ?? 0) > 0).length;
 
     return [
-      _title('Weekly Summary'),
+      _title('Last 7 Days Summary'),
       pw.Row(children: [
-        pw.Expanded(child: _stat('Total Steps', _fmt(totalSteps), _green)),
-        pw.SizedBox(width: 12),
-        pw.Expanded(child: _stat('Calories', '$totalCals', _accent, unit: 'kcal')),
+        pw.Expanded(child: _stat('Avg Steps', _fmt(avgSteps), _green)),
+        pw.SizedBox(width: 10),
+        pw.Expanded(child: _stat('Avg Calories', '$avgCals', _accent, unit: 'kcal')),
+        pw.SizedBox(width: 10),
+        pw.Expanded(child: _stat('Avg Tablets', '$activeDays / $dayCount', _blue)),
       ]),
       pw.SizedBox(height: 20),
 
@@ -558,11 +564,17 @@ class ShareableReportCard extends StatelessWidget {
     final ts = data['totalSteps'] ?? 0;
     final tc = data['totalCalories'] ?? 0;
     final daily = (data['dailyData'] as List<dynamic>?) ?? [];
+    final dayCount = daily.isNotEmpty ? daily.length : 7;
+    final avgSteps = dayCount > 0 ? (ts / dayCount).round() : 0;
+    final avgCals = dayCount > 0 ? (tc / dayCount).round() : 0;
+    final activeDays = daily.where((d) => ((d as Map)['steps'] ?? 0) > 0).length;
     return Column(children: [
       Row(children: [
-        Expanded(child: _miniCard(Icons.directions_walk_rounded, _n(ts), 'Total Steps', const Color(0xFF30D158))),
+        Expanded(child: _miniCard(Icons.directions_walk_rounded, _n(avgSteps), 'Avg Steps', const Color(0xFF30D158))),
         const SizedBox(width: 8),
-        Expanded(child: _miniCard(Icons.local_fire_department_rounded, '$tc', 'Calories', const Color(0xFFFF6B2B))),
+        Expanded(child: _miniCard(Icons.local_fire_department_rounded, '$avgCals', 'Avg Calories', const Color(0xFFFF6B2B))),
+        const SizedBox(width: 8),
+        Expanded(child: _miniCard(Icons.medication_rounded, '$activeDays / $dayCount', 'Avg Tablets', const Color(0xFF0A84FF))),
       ]),
       if (daily.isNotEmpty) ...[
         const SizedBox(height: 16),
