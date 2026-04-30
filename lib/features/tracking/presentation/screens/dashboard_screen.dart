@@ -3046,6 +3046,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     return 0;
   }
 
+  /// Goal for each phase (the upper limit of that phase)
+  static int _getPhaseGoal(int steps) {
+    if (steps <= 5000) return 5000;
+    if (steps <= 7000) return 7000;
+    if (steps <= 10000) return 10000;
+    if (steps <= 12000) return 12000;
+    return 15000; // Limit Zone stretch goal
+  }
+
   // ── HERO CARD ────────────────────────────────────────────
   Widget _heroCard(DashboardState state, int sessionSteps) {
     var rawCalories = state.todayActivity?['calories'] ?? 0.0;
@@ -3066,7 +3075,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     }
     final calories = rawCalories.toInt();
     
-    final goal = state.todayActivity?['goal'] ?? state.todayActivity?['goalSteps'] ?? 7000;
+    final goal = _getPhaseGoal(steps);
     final progress = (steps / goal).clamp(0.0, 1.0);
     final phaseName = _getPhaseName(steps);
     
@@ -3244,10 +3253,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
         if (dateStr == todayStr) continue;
         final daySteps = (d['steps'] ?? 0) as int;
-        if (_getPhaseName(daySteps) == currentPhase) {
+        // A day with 0 steps doesn't count — user wasn't active
+        if (daySteps > 0 && _getPhaseName(daySteps) == currentPhase) {
           streakDays++;
         } else {
-          break; // streak broken
+          break; // streak broken (inactive or different phase)
         }
       }
     }
