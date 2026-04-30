@@ -2808,25 +2808,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         ]),
       ),
       const SizedBox(height: 16),
-      // Show averages for Last 7 Days
+      // Show averages for Last 7 Days — 3 cards in one row
       () {
         final dayCount = dailyData.isNotEmpty ? dailyData.length : 7;
         final avgSteps = dayCount > 0 ? (totalSteps / dayCount).round() : 0;
         final avgCals = dayCount > 0 ? (totalCalories / dayCount).round() : 0;
         // Count days where any habit/tablet was taken (fallback: count active days)
         final activeDays = dailyData.where((d) => ((d as Map)['steps'] ?? 0) > 0).length;
-        return Column(children: [
-          Row(children: [
-            Expanded(child: _statSummaryCard(icon: Icons.directions_walk_rounded, value: _formatSteps(avgSteps), label: 'Avg Steps', color: _T.green)),
-            const SizedBox(width: 12),
-            Expanded(child: _statSummaryCard(icon: Icons.local_fire_department_rounded, value: avgCals.toString(), label: 'Avg Calories', color: _T.accent)),
-          ]),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: _statSummaryCard(icon: Icons.medication_rounded, value: '$activeDays / $dayCount', label: 'Avg Tablets', color: _T.blue)),
-            const SizedBox(width: 12),
-            Expanded(child: _statSummaryCard(icon: Icons.directions_walk_rounded, value: _formatSteps(totalSteps), label: 'Total Steps', color: _T.purple)),
-          ]),
+        return Row(children: [
+          Expanded(child: _statSummaryCard(icon: Icons.directions_walk_rounded, value: _formatSteps(avgSteps), label: 'Avg Steps', color: _T.green)),
+          const SizedBox(width: 10),
+          Expanded(child: _statSummaryCard(icon: Icons.local_fire_department_rounded, value: avgCals.toString(), label: 'Avg Calories', color: _T.accent)),
+          const SizedBox(width: 10),
+          Expanded(child: _statSummaryCard(icon: Icons.medication_rounded, value: '$activeDays / $dayCount', label: 'Avg Tablets', color: _T.blue)),
         ]);
       }(),
       const SizedBox(height: 20),
@@ -3226,15 +3220,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 
   // ── PREMIUM STREAK CARD ──────────────────────────────────
   Widget _premiumStreakCard() {
-    // Build day labels starting from today
-    final allDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    final todayWeekday = DateTime.now().weekday % 7; // 0=Sun, 1=Mon, ... 6=Sat
-    final dayLabels = List.generate(7, (i) => allDays[(todayWeekday + i) % 7]);
-    // Today is always index 0; past days are done (none since today is first)
-    const currentIndex = 0;
-    // No past days are "done" since today is the first dot
-    final List<int> doneIndices = [0]; // only today is marked
-
     // Get current steps for phase calculation
     final state = ref.watch(dashboardProvider);
     final apiSteps = (state.todayActivity?['steps'] ?? 0) as int;
@@ -3243,9 +3228,49 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final currentPhase = _getPhaseName(currentSteps);
     final nextPhase = _getNextPhaseName(currentSteps);
     final remaining = _stepsToNextPhase(currentSteps);
+
+    // Calculate streak: how many consecutive days (including today) the user
+    // has been in the current phase, using the weekly stats daily data.
+    final weeklyData = state.weeklyStats ?? {};
+    final daysList = (weeklyData['days'] as List<dynamic>?) ?? [];
+
+    // Build a list of per-day phases from the API (most recent last)
+    // Then walk backwards from today counting consecutive days in currentPhase.
+    int streakDays = 1; // today always counts
+    if (daysList.isNotEmpty) {
+      // daysList is ordered oldest → newest; walk backwards skipping today
+      for (int i = daysList.length - 1; i >= 0; i--) {
+        final d = daysList[i] as Map<String, dynamic>;
+        final dateStr = d['date'] ?? '';
+        // Skip today — we already counted it
+        final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+        if (dateStr == todayStr) continue;
+        final daySteps = (d['steps'] ?? 0) as int;
+        if (_getPhaseName(daySteps) == currentPhase) {
+          streakDays++;
+        } else {
+          break; // streak broken
+        }
+      }
+    }
+    streakDays = streakDays.clamp(1, 7);
+
+    // Build day labels: start from the streak start date, go 7 days forward
+    final allDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    final streakStartDate = DateTime.now().subtract(Duration(days: streakDays - 1));
+    final dayLabels = List.generate(7, (i) {
+      final d = streakStartDate.add(Duration(days: i));
+      return allDays[d.weekday % 7];
+    });
+
+    // Today's index in the 7-dot row
+    final currentIndex = streakDays - 1; // 0-based position of today
+    // Mark all days from start up to today as done
+    final doneIndices = List.generate(streakDays, (i) => i);
+
     final streakSubtitle = nextPhase != null
-        ? 'Keep it up! $remaining steps to $nextPhase'
-        : '🔥 You\'re in the Limit Zone!';
+        ? '$streakDays day streak! $remaining steps to $nextPhase'
+        : '🔥 $streakDays day streak in Limit Zone!';
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 22),
