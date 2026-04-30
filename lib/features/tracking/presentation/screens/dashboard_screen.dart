@@ -2561,7 +2561,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 
           // Report content
           // Report content (wrapped in RepaintBoundary for screenshot capture)
-          if (_reportData != null)
+          // Only show the branded card for Day and Month reports; Last 7 Days shows avg cards directly
+          if (_reportData != null && _reportSegment != 1)
             RepaintBoundary(
               key: _reportCardKey,
               child: ShareableReportCard(
@@ -2571,7 +2572,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 segment: _reportSegment,
               ),
             ),
-          if (_reportData != null) const SizedBox(height: 16),
+          if (_reportData != null && _reportSegment != 1) const SizedBox(height: 16),
           if (_reportData != null) ..._buildReportContent(),
           if (_reportData == null && !_reportLoading)
             Container(
@@ -3225,9 +3226,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 
   // ── PREMIUM STREAK CARD ──────────────────────────────────
   Widget _premiumStreakCard() {
-    const dayLabels   = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const doneIndices = [0, 1, 2, 3];
-    const currentIndex = 3;
+    // Build day labels starting from today
+    final allDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    final todayWeekday = DateTime.now().weekday % 7; // 0=Sun, 1=Mon, ... 6=Sat
+    final dayLabels = List.generate(7, (i) => allDays[(todayWeekday + i) % 7]);
+    // Today is always index 0; past days are done (none since today is first)
+    const currentIndex = 0;
+    // No past days are "done" since today is the first dot
+    final List<int> doneIndices = [0]; // only today is marked
 
     // Get current steps for phase calculation
     final state = ref.watch(dashboardProvider);
