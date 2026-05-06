@@ -1,0 +1,203 @@
+import 'package:flutter/material.dart';
+import '../../domain/entities/subscription_entity.dart';
+import 'status_badge.dart';
+
+class SubscriptionCard extends StatelessWidget {
+  final SubscriptionEntity subscription;
+  final VoidCallback? onApprove;
+  final VoidCallback? onReject;
+
+  const SubscriptionCard({
+    super.key,
+    required this.subscription,
+    this.onApprove,
+    this.onReject,
+  });
+
+  static const Color _cardColor = Color(0xFF1A1A1A);
+  static const Color _accent = Color(0xFFFF6B00);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.06)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // User info row
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      subscription.userName,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subscription.userEmail,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.5),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              StatusBadge.fromString(subscription.status),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Plan and dates row
+          Row(
+            children: [
+              Expanded(
+                child: _InfoChip(
+                  label: 'Plan',
+                  value: subscription.plan.toUpperCase(),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _InfoChip(
+                  label: 'Requested',
+                  value: subscription.requestedAt != null
+                      ? _formatDate(subscription.requestedAt!)
+                      : 'N/A',
+                ),
+              ),
+              if (subscription.approvedAt != null) ...[
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _InfoChip(
+                    label: 'Approved',
+                    value: _formatDate(subscription.approvedAt!),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          // Action buttons for pending subscriptions
+          if (subscription.status == 'pending' &&
+              (onApprove != null || onReject != null))
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Row(
+                children: [
+                  if (onReject != null)
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: onReject,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFFF5252),
+                          side: const BorderSide(
+                            color: Color(0xFF3A1A1A),
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        child: const Text(
+                          'Reject',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (onApprove != null) const SizedBox(width: 12),
+                  if (onApprove != null)
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: onApprove,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _accent,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        child: const Text(
+                          'Approve',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
+}
+
+/// Helper widget for displaying subscription info
+class _InfoChip extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _InfoChip({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.5),
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+}

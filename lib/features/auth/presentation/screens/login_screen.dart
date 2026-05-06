@@ -36,9 +36,9 @@ class _LoginScreenState extends State<LoginScreen> {
     if (_authMode == 0) {
       // Email/Password login
       if (!_formKey.currentState!.validate()) return;
-      
+
       final authProvider = context.read<AuthProvider>();
-      
+
       await authProvider.login(
         email: _emailController.text.trim(),
         password: _passwordController.text,
@@ -152,6 +152,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     // ── FOOTER ──
                     _buildFooter(),
 
+                    const SizedBox(height: 16),
+
+                    _buildAdminLoginLink(),
+
                     const SizedBox(height: 24),
                   ],
                 ),
@@ -238,10 +242,7 @@ class _LoginScreenState extends State<LoginScreen> {
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A1A),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.1),
-          width: 1,
-        ),
+        border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
       ),
       padding: const EdgeInsets.all(4),
       child: Row(
@@ -302,8 +303,9 @@ class _LoginScreenState extends State<LoginScreen> {
           keyboardType: TextInputType.emailAddress,
           validator: (value) {
             if (value?.isEmpty ?? true) return 'Email is required';
-            if (!RegExp(r'^[a-zA-Z0-9._%-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
-                .hasMatch(value!)) {
+            if (!RegExp(
+              r'^[a-zA-Z0-9._%-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+            ).hasMatch(value!)) {
               return 'Enter a valid email';
             }
             return null;
@@ -359,8 +361,9 @@ class _LoginScreenState extends State<LoginScreen> {
           keyboardType: TextInputType.emailAddress,
           validator: (value) {
             if (value?.isEmpty ?? true) return 'Email is required';
-            if (!RegExp(r'^[a-zA-Z0-9._%-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
-                .hasMatch(value!)) {
+            if (!RegExp(
+              r'^[a-zA-Z0-9._%-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+            ).hasMatch(value!)) {
               return 'Enter a valid email';
             }
             return null;
@@ -453,10 +456,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(
-                color: Color(0xFFE74C3C),
-                width: 1,
-              ),
+              borderSide: const BorderSide(color: Color(0xFFE74C3C), width: 1),
             ),
             suffixIcon: suffixIcon,
             counterText: '',
@@ -553,10 +553,7 @@ class _LoginScreenState extends State<LoginScreen> {
     return Row(
       children: [
         Expanded(
-          child: Container(
-            height: 1,
-            color: Colors.white.withOpacity(0.1),
-          ),
+          child: Container(height: 1, color: Colors.white.withOpacity(0.1)),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -570,10 +567,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
         Expanded(
-          child: Container(
-            height: 1,
-            color: Colors.white.withOpacity(0.1),
-          ),
+          child: Container(height: 1, color: Colors.white.withOpacity(0.1)),
         ),
       ],
     );
@@ -586,10 +580,7 @@ class _LoginScreenState extends State<LoginScreen> {
       child: OutlinedButton(
         onPressed: () => _showSnackBar('Coming soon!'),
         style: OutlinedButton.styleFrom(
-          side: BorderSide(
-            color: Colors.white.withOpacity(0.15),
-            width: 1,
-          ),
+          side: BorderSide(color: Colors.white.withOpacity(0.15), width: 1),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
@@ -649,6 +640,22 @@ class _LoginScreenState extends State<LoginScreen> {
                 ..onTap = () => context.go(RouteNames.register),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAdminLoginLink() {
+    return Center(
+      child: GestureDetector(
+        onTap: () => context.go(RouteNames.adminLogin),
+        child: Text(
+          'Admin Login',
+          style: GoogleFonts.poppins(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: const Color(0xFFFF7A00),
+          ),
         ),
       ),
     );
