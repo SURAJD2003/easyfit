@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/api_client.dart';
@@ -14,13 +16,14 @@ enum AuthStatus { idle, loading, success, error }
 
 class AuthProvider extends ChangeNotifier {
   final _authService = AuthService();
-  
+
   AuthStatus _status = AuthStatus.idle;
   String? _errorMessage;
   RegisterResponse? _registerResponse;
   String? _token;
   String? _refreshToken;
   Map<String, dynamic>? _userProfile;
+  Future<void>? _authCheckFuture;
 
   AuthStatus get status => _status;
   String? get errorMessage => _errorMessage;
@@ -32,7 +35,7 @@ class AuthProvider extends ChangeNotifier {
   bool get isAuthenticated => _token != null;
 
   AuthProvider() {
-    checkAuthStatus();
+    unawaited(checkAuthStatus());
   }
 
   Future<void> fetchProfile() async {
@@ -44,13 +47,28 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> checkAuthStatus() async {
+    final existingCheck = _authCheckFuture;
+    if (existingCheck != null) {
+      await existingCheck;
+      return;
+    }
+
+    _authCheckFuture = _checkAuthStatus();
+    try {
+      await _authCheckFuture;
+    } finally {
+      _authCheckFuture = null;
+    }
+  }
+
+  Future<void> _checkAuthStatus() async {
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('auth_token');
     _refreshToken = prefs.getString('auth_refresh_token');
     if (_token != null) {
       ApiClient().setToken(_token!);
       _status = AuthStatus.success;
-      await fetchProfile(); // fetch profile quietly in background
+      unawaited(fetchProfile()); // fetch profile quietly in background
     }
     notifyListeners();
   }
@@ -79,11 +97,12 @@ class AuthProvider extends ChangeNotifier {
       _token = result.data?.token;
       _refreshToken = result.data?.refreshToken;
       _status = AuthStatus.success;
-      
+
       final prefs = await SharedPreferences.getInstance();
       if (_token != null) await prefs.setString('auth_token', _token!);
-      if (_refreshToken != null) await prefs.setString('auth_refresh_token', _refreshToken!);
-      
+      if (_refreshToken != null)
+        await prefs.setString('auth_refresh_token', _refreshToken!);
+
       await fetchProfile();
     } else {
       _errorMessage = result.error?.message ?? 'Registration failed';
@@ -93,30 +112,25 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> login({
-    required String email,
-    required String password,
-  }) async {
+  Future<void> login({required String email, required String password}) async {
     _status = AuthStatus.loading;
     _errorMessage = null;
     notifyListeners();
 
     final result = await _authService.login(
-      LoginRequest(
-        email: email,
-        password: password,
-      ),
+      LoginRequest(email: email, password: password),
     );
 
     if (result.isSuccess) {
       _token = result.data?.token;
       _refreshToken = result.data?.refreshToken;
       _status = AuthStatus.success;
-      
+
       final prefs = await SharedPreferences.getInstance();
       if (_token != null) await prefs.setString('auth_token', _token!);
-      if (_refreshToken != null) await prefs.setString('auth_refresh_token', _refreshToken!);
-      
+      if (_refreshToken != null)
+        await prefs.setString('auth_refresh_token', _refreshToken!);
+
       await fetchProfile();
     } else {
       _errorMessage = result.error?.message ?? 'Login failed';
@@ -142,11 +156,11 @@ class AuthProvider extends ChangeNotifier {
       _token = null;
       _refreshToken = null;
       _status = AuthStatus.success;
-      
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('auth_token');
       await prefs.remove('auth_refresh_token');
-      
+
       notifyListeners();
       return;
     }
@@ -159,7 +173,7 @@ class AuthProvider extends ChangeNotifier {
       _token = null;
       _refreshToken = null;
       _status = AuthStatus.success;
-      
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('auth_token');
       await prefs.remove('auth_refresh_token');

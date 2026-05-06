@@ -1346,7 +1346,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../core/router/route_names.dart';
+import 'package:easyfit_clinics/core/router/route_names.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
@@ -1784,6 +1784,73 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     return Scaffold(
       backgroundColor: _T.bg,
       extendBody: true,
+      drawer: Drawer(
+        backgroundColor: _T.bg,
+        child: Column(
+          children: [
+            DrawerHeader(
+              decoration: const BoxDecoration(
+                color: _T.card,
+                border: Border(bottom: BorderSide(color: Colors.white10)),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 30,
+                    backgroundColor: _T.accent.withOpacity(0.1),
+                    child: Text(
+                      ref.watch(dashboardProvider).todayActivity?['user_name']?[0] ?? 'S',
+                      style: const TextStyle(color: _T.accent, fontSize: 24, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          ref.watch(dashboardProvider).todayActivity?['user_name'] ?? 'User',
+                          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        const Text(
+                          'EasyFit Member',
+                          style: TextStyle(color: Colors.white38, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_outline, color: Colors.white70),
+              title: const Text('My Profile', style: TextStyle(color: Colors.white70)),
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined, color: Colors.white70),
+              title: const Text('Settings', style: TextStyle(color: Colors.white70)),
+              onTap: () => Navigator.pop(context),
+            ),
+            const Spacer(),
+            const Divider(color: Colors.white10),
+            ListTile(
+              leading: const Icon(Icons.logout_rounded, color: Colors.redAccent),
+              title: const Text('Logout', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+              onTap: () async {
+                // ✅ Close drawer first
+                Navigator.pop(context);
+                await provider.Provider.of<AuthProvider>(context, listen: false).logoutApi();
+                if (mounted) {
+                  context.go(RouteNames.login);
+                }
+              },
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
       body: SafeArea(bottom: false, child: _body(state, sessionSteps)),
       bottomNavigationBar: _bottomPill(),
       // FAB only on Home tab
@@ -2992,6 +3059,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       padding: const EdgeInsets.fromLTRB(22, 18, 22, 0),
       child: Row(
         children: [
+          GestureDetector(
+            onTap: () => Scaffold.of(context).openDrawer(),
+            child: Container(
+              width: 38, height: 38,
+              margin: const EdgeInsets.only(right: 12),
+              decoration: BoxDecoration(
+                color: _T.card,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.menu_rounded, color: _T.accent, size: 22),
+            ),
+          ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
