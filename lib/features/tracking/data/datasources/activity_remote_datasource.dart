@@ -54,15 +54,21 @@ class ActivityRemoteDatasource {
   }
 
   // POST /activity/session/start → "Continue Your Journey" tapped
+  // Backend handles orphan sessions automatically:
+  //   201 = new session created
+  //   200 = resumed existing session (still fresh)
   Future<Map<String, dynamic>> startSession(int baselineSteps) async {
     final response = await _dio.post(
       ApiConstants.activitySessionStart,
       data: {
-        'startTime': DateTime.now().toUtc().toIso8601String(),
+        'startTime': DateTime.now().toIso8601String(),
         'baselineSteps': baselineSteps,
       },
     );
-    return _parseResponse(response.data);
+    final parsed = _parseResponse(response.data);
+    // Include HTTP status so caller knows if session was resumed (200) or new (201)
+    parsed['_httpStatus'] = response.statusCode;
+    return parsed;
   }
 
   // PATCH /activity/session/stop → session ended
@@ -76,7 +82,7 @@ class ActivityRemoteDatasource {
       ApiConstants.activitySessionStop,
       data: {
         'sessionId': sessionId,
-        'endTime': DateTime.now().toUtc().toIso8601String(),
+        'endTime': DateTime.now().toIso8601String(),
         'finalSteps': finalSteps,
         'finalCalories': finalCalories,
         'finalDistance': finalDistance,
@@ -99,7 +105,7 @@ class ActivityRemoteDatasource {
         'steps': steps,
         'calories': calories,
         'distance': distance,
-        'timestamp': DateTime.now().toUtc().toIso8601String(),
+        'timestamp': DateTime.now().toIso8601String(),
       },
     );
   }

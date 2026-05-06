@@ -105,7 +105,7 @@ void onStart(ServiceInstance service) async {
           final currentSessionId = prefs.getString('active_session_id') ?? '';
           if (token.isNotEmpty && currentSessionId.isNotEmpty) {
             final dio = Dio(BaseOptions(
-              baseUrl: 'https://parkmitra.com/api',
+              baseUrl: 'https://api.theeasyfitclinics.com/api',
               headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
@@ -117,7 +117,7 @@ void onStart(ServiceInstance service) async {
               'steps': totalSteps,
               'calories': (totalSteps * 0.045).round(),
               'distance': double.parse((totalSteps * 0.000762).toStringAsFixed(3)),
-              'timestamp': DateTime.now().subtract(const Duration(seconds: 1)).toUtc().toIso8601String(),
+              'timestamp': DateTime.now().subtract(const Duration(seconds: 1)).toIso8601String(),
             });
           }
         } catch (_) {}
@@ -146,35 +146,31 @@ void onStart(ServiceInstance service) async {
   }
 
   // Listen to pedometer
-  int lastHour = DateTime.now().hour;
-  int stepsAtHourStart = 0;
+  int lastPedometerValue = -1;
   
   pedometerSub = Pedometer.stepCountStream.listen((StepCount event) {
     if (baseSteps == -1) {
       baseSteps = event.steps;
-      stepsAtHourStart = 0;
     }
     currentSteps = event.steps - baseSteps;
+    
+    // Calculate raw delta for hourly tracking (immune to session restarts)
+    int rawDelta = 0;
+    if (lastPedometerValue != -1) {
+      rawDelta = event.steps - lastPedometerValue;
+    }
+    lastPedometerValue = event.steps;
     
     // Persist total for the foreground to pick up
     final totalSteps = accumulatedBefore + currentSteps;
     SharedPreferences.getInstance().then((p) {
       p.setInt('session_accumulated_steps', totalSteps);
       
-      // ── Track per-hour steps ──
-      final nowHour = DateTime.now().hour;
-      if (nowHour != lastHour) {
-        // Hour changed — finalize previous hour and start new one
-        stepsAtHourStart = totalSteps;
-        lastHour = nowHour;
-      }
-      // Update current hour's delta
-      final hourSteps = totalSteps - stepsAtHourStart;
-      final prevHourSteps = p.getInt('hourly_steps_$nowHour') ?? 0;
-      // Accumulate on top of what was already counted for this hour
-      // (in case service restarts mid-hour)
-      if (hourSteps > 0) {
-        p.setInt('hourly_steps_$nowHour', prevHourSteps > hourSteps ? prevHourSteps : hourSteps);
+      // ── Track per-hour steps (Delta Method) ──
+      if (rawDelta > 0 && rawDelta < 1000) { // filter out massive boot jumps
+        final nowHour = DateTime.now().hour;
+        final prevHourSteps = p.getInt('hourly_steps_$nowHour') ?? 0;
+        p.setInt('hourly_steps_$nowHour', prevHourSteps + rawDelta);
       }
     });
     
@@ -219,7 +215,7 @@ void onStart(ServiceInstance service) async {
       final distance = double.parse((totalSteps * 0.000762).toStringAsFixed(3));
       
       final dio = Dio(BaseOptions(
-        baseUrl: 'https://parkmitra.com/api',
+        baseUrl: 'https://api.theeasyfitclinics.com/api',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
@@ -232,7 +228,7 @@ void onStart(ServiceInstance service) async {
         'steps': totalSteps,
         'calories': calories,
         'distance': distance,
-        'timestamp': DateTime.now().toUtc().toIso8601String(),
+        'timestamp': DateTime.now().toIso8601String(),
       });
       
       lastSyncedTotal = totalSteps;

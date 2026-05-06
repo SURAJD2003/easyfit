@@ -71,7 +71,6 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
     _hourlyLoaded = true;
     final prefs = await SharedPreferences.getInstance();
     final total = _todaySteps;
-    if (total == 0) return;
 
     // Try to read hourly_steps_X keys (set by background service / pedometer)
     final now = DateTime.now();
@@ -91,8 +90,8 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
       if (remainder > 0) {
         hourly[now.hour] += remainder.toDouble();
       }
-    } else {
-      // No hourly data — distribute naturally across active hours
+    } else if (total > 0) {
+      // No hourly data but API has steps — distribute naturally across active hours
       final currentHour = now.hour;
       final activeMins = _todayActive;
       // Determine how many hours we were active

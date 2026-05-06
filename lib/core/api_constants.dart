@@ -1,5 +1,5 @@
 class ApiConstants {
-  static const String baseUrl = 'https://parkmitra.com/api';
+  static const String baseUrl = 'https://api.theeasyfitclinics.com/api';
 
   // ── Auth ─────────────────────────────────────────────
   static const String register       = '/auth/register';
@@ -10,6 +10,7 @@ class ApiConstants {
 
   // ── User ──────────────────────────────────────────────
   static const String userProfile    = '/user/profile';
+  static const String deleteAccount  = '/user/account';
 
   // ── Dashboard ─────────────────────────────────────────
   static const String dashboard = '/dashboard';

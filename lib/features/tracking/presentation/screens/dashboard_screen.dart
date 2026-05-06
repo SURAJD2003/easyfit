@@ -1359,6 +1359,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart' as provider;
 import '../../../../providers/auth_provider.dart';
 import '../../../../core/api_client.dart';
+import '../../../../core/api_constants.dart';
 import '../widgets/milestone_celebration_overlay.dart';
 import '../widgets/report_share_utils.dart';
 
@@ -1476,10 +1477,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         setState(() => _lastCompletedSteps = saved);
         debugPrint('📱 Restored completed steps: $saved');
       }
-    } else if (savedDate.isNotEmpty) {
-      // Old date — clear stale data
+    } else {
+      // New day (or first launch) — clear ALL stale daily data
+      debugPrint('🌅 New day detected ($savedDate → $today), clearing stale data');
+      _lastCompletedSteps = 0;
       await prefs.remove('completed_steps_today');
       await prefs.remove('completed_steps_date');
+      // Clear stale hourly step data (stats Day tab)
+      for (int h = 0; h < 24; h++) {
+        await prefs.remove('hourly_steps_$h');
+      }
     }
   }
 
@@ -1637,13 +1644,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         }
       }
       
-      // 3. Clear hourly step data for the new day
+      // 3. Reset completed steps for the new day
+      _lastCompletedSteps = 0;
+      
+      // 4. Clear hourly step data and stale completed steps
       final prefs = await SharedPreferences.getInstance();
       for (int h = 0; h < 24; h++) {
         await prefs.remove('hourly_steps_$h');
       }
+      await prefs.remove('completed_steps_today');
+      await prefs.remove('completed_steps_date');
       
-      // 4. Refresh dashboard API data (will fetch new "today")
+      // 5. Refresh dashboard API data (will fetch new "today")
       ref.read(dashboardProvider.notifier).refresh();
       
       // 5. Schedule next midnight
@@ -3023,17 +3035,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   ///  10001 – 12000 → Transformation Phase
   ///  12000+        → Limit Zone
   static String _getPhaseName(int steps) {
-    if (steps <= 5000) return 'Activation';
-    if (steps <= 7000) return 'Fat Loss';
-    if (steps <= 10000) return 'Metabolic';
-    if (steps <= 12000) return 'Transformation';
+    if (steps <= 5000) return 'Activation Phase';
+    if (steps <= 7000) return 'Fat Loss Phase';
+    if (steps <= 10000) return 'Metabolic Phase';
+    if (steps <= 12000) return 'Transformation Phase';
     return 'Limit Zone';
   }
 
   static String? _getNextPhaseName(int steps) {
-    if (steps <= 5000) return 'Fat Loss';
-    if (steps <= 7000) return 'Metabolic';
-    if (steps <= 10000) return 'Transformation';
+    if (steps <= 5000) return 'Fat Loss Phase';
+    if (steps <= 7000) return 'Metabolic Phase';
+    if (steps <= 10000) return 'Transformation Phase';
     if (steps <= 12000) return 'Limit Zone';
     return null; // already at max
   }
@@ -3241,27 +3253,35 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final weeklyData = state.weeklyStats ?? {};
     final daysList = (weeklyData['days'] as List<dynamic>?) ?? [];
 
-    // Build a list of per-day phases from the API (most recent last)
-    // Then walk backwards from today counting consecutive days in currentPhase.
-    int streakDays = 1; // today always counts
+    // Build a list of per-day steps from the API (most recent last)
+    // Then walk backwards from today counting consecutive days where
+    // the user COMPLETED the current phase goal (steps >= phaseGoal).
+    final phaseGoal = _getPhaseGoal(currentSteps);
+    int streakDays = 0; // today only counts if goal is met
+    
+    // Check if today's steps meet the goal
+    if (currentSteps >= phaseGoal) {
+      streakDays = 1;
+    }
+    
     if (daysList.isNotEmpty) {
       // daysList is ordered oldest → newest; walk backwards skipping today
       for (int i = daysList.length - 1; i >= 0; i--) {
         final d = daysList[i] as Map<String, dynamic>;
         final dateStr = d['date'] ?? '';
-        // Skip today — we already counted it
+        // Skip today — we already checked it above
         final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
         if (dateStr == todayStr) continue;
         final daySteps = (d['steps'] ?? 0) as int;
-        // A day with 0 steps doesn't count — user wasn't active
-        if (daySteps > 0 && _getPhaseName(daySteps) == currentPhase) {
+        // Day counts only if user completed the phase goal
+        if (daySteps >= phaseGoal) {
           streakDays++;
         } else {
-          break; // streak broken (inactive or different phase)
+          break; // streak broken (didn't complete goal)
         }
       }
     }
-    streakDays = streakDays.clamp(1, 7);
+    streakDays = streakDays.clamp(0, 7);
 
     // Build day labels: last 7 days ending at today (today = rightmost)
     final allDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -3311,7 +3331,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   ),
                   const SizedBox(width: 12),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('$currentPhase Phase', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: _T.hi)),
+                    Text(currentPhase, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: _T.hi)),
                     const SizedBox(height: 3),
                     Text(streakSubtitle, style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
                   ])),
@@ -3554,10 +3574,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           const SizedBox(height: 24),
           Container(height: 1, color: _T.divider),
           const SizedBox(height: 16),
-          _profileTile(Icons.person_outline_rounded, 'Edit Profile'),
           _profileTile(Icons.workspace_premium_rounded, 'Subscription', badge: 'Free'),
-          _profileTile(Icons.notifications_outlined, 'Notifications'),
-          _profileTile(Icons.help_outline_rounded, 'Help & Support'),
           const SizedBox(height: 8),
           _profileTile(Icons.logout_rounded, 'Sign Out', danger: true, onTap: () async {
             Navigator.pop(context); // close sheet
@@ -3569,7 +3586,141 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               context.go(RouteNames.login);
             }
           }),
+          const SizedBox(height: 4),
+          _profileTile(Icons.delete_forever_rounded, 'Delete Account', danger: true, onTap: () {
+            Navigator.pop(context); // close profile sheet
+            _showDeleteAccountDialog();
+          }),
         ]),
+      ),
+    );
+  }
+
+  void _showDeleteAccountDialog() {
+    final passwordController = TextEditingController();
+    bool isLoading = false;
+    bool obscure = true;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(children: [
+            const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 24),
+            const SizedBox(width: 10),
+            Text('Delete Account', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.redAccent)),
+          ]),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This action is permanent and cannot be undone. All your data will be deleted.',
+                style: GoogleFonts.inter(fontSize: 13, color: _T.mid, height: 1.5),
+              ),
+              const SizedBox(height: 20),
+              Text('Enter your password to confirm:', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: _T.hi)),
+              const SizedBox(height: 10),
+              TextField(
+                controller: passwordController,
+                obscureText: obscure,
+                style: GoogleFonts.inter(color: _T.hi, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Password',
+                  hintStyle: GoogleFonts.inter(color: _T.lo),
+                  filled: true,
+                  fillColor: const Color(0xFF0A0A0A),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _T.divider)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _T.divider)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.redAccent)),
+                  suffixIcon: IconButton(
+                    icon: Icon(obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded, color: _T.lo, size: 20),
+                    onPressed: () => setDialogState(() => obscure = !obscure),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: isLoading ? null : () => Navigator.pop(ctx),
+              child: Text('Cancel', style: GoogleFonts.inter(color: _T.mid, fontWeight: FontWeight.w600)),
+            ),
+            TextButton(
+              onPressed: isLoading ? null : () async {
+                final password = passwordController.text.trim();
+                if (password.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Please enter your password', style: GoogleFonts.inter(color: Colors.white)),
+                      backgroundColor: Colors.redAccent,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      margin: const EdgeInsets.all(16),
+                    ),
+                  );
+                  return;
+                }
+
+                setDialogState(() => isLoading = true);
+                try {
+                  final dio = ApiClient().dio;
+                  await dio.delete(
+                    ApiConstants.deleteAccount,
+                    data: {'password': password},
+                  );
+
+                  // Success — clear everything and go to login
+                  Navigator.pop(ctx);
+                  FlutterBackgroundService().invoke('stopService');
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.clear();
+                  ApiClient().clearToken();
+
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Account deleted successfully', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600)),
+                        backgroundColor: _T.green,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        margin: const EdgeInsets.all(16),
+                      ),
+                    );
+                    context.go(RouteNames.login);
+                  }
+                } on DioException catch (e) {
+                  setDialogState(() => isLoading = false);
+                  String msg = 'Failed to delete account';
+                  if (e.response?.statusCode == 401) msg = 'Incorrect password';
+                  if (e.response?.statusCode == 404) msg = 'Account not found';
+                  final responseData = e.response?.data;
+                  if (responseData is Map && responseData['message'] != null) {
+                    msg = responseData['message'];
+                  }
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(msg, style: GoogleFonts.inter(color: Colors.white)),
+                      backgroundColor: Colors.redAccent,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      margin: const EdgeInsets.all(16),
+                    ),
+                  );
+                } catch (e) {
+                  setDialogState(() => isLoading = false);
+                  debugPrint('❌ Delete account error: $e');
+                }
+              },
+              child: isLoading
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.redAccent))
+                  : Text('Delete', style: GoogleFonts.inter(color: Colors.redAccent, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -3602,13 +3753,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       onTap: () async {
         HapticFeedback.mediumImpact();
         
-        // Check REAL session state from SharedPreferences (not just local flag)
         final prefs = await SharedPreferences.getInstance();
-        final existingSessionId = prefs.getString('active_session_id') ?? '';
-        final hasActiveSession = existingSessionId.isNotEmpty;
-        
-        // Simple toggle: if not tracking → start, if tracking → stop
-        // Stale session IDs (e.g. from backup restore) get cleaned up during start
         final shouldStart = !_isTracking;
         
         setState(() {
@@ -3625,41 +3770,65 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           final repo = ref.read(trackingRepositoryProvider);
           final service = FlutterBackgroundService();
           if (shouldStart) {
-             // CRITICAL: Android 13+ Notification Prompt
+            // ── START SESSION ──────────────────────────────
+            // CRITICAL: Android 13+ Notification Prompt
             await Permission.notification.request();
             // CRITICAL: Android 14 Health Foreground Rules
             await Permission.activityRecognition.request();
             
-            // Stop any old stale service first
+            // Stop any old stale background service first
             service.invoke('stopService');
             await Future.delayed(const Duration(milliseconds: 300));
             
-            // If there's an old session, stop it on backend first
-            if (hasActiveSession) {
-              try {
-                final oldSteps = ref.read(pedometerProvider).value ?? 0;
-                await repo.stopSession(
-                  sessionId: existingSessionId,
-                  finalSteps: oldSteps,
-                  finalCalories: (oldSteps * 0.045).round(),
-                  finalDistance: double.parse((oldSteps * 0.000762).toStringAsFixed(3)),
-                );
-                await prefs.remove('active_session_id');
-                debugPrint('🧹 Cleaned up old session: $existingSessionId');
-              } catch (e) {
-                debugPrint('⚠️ Old session cleanup failed: $e');
-                await prefs.remove('active_session_id');
-              }
-            }
+            // Clear any stale local session data (handles reinstall scenario)
+            await prefs.remove('active_session_id');
+            await prefs.remove('session_accumulated_steps');
             
             // Reset pedometer & start counting fresh for this session
             // NOTE: _lastCompletedSteps is intentionally kept — previous session steps stay visible
             ref.read(pedometerProvider.notifier).startSession();
             
-            // Start session on server & save sessionId BEFORE starting service
-            final sessionResponse = await repo.startSession(0);
+            // Try to start session on backend
+            // If backend returns 400 "active session exists", try to stop orphan & retry
+            Map<String, dynamic> sessionResponse;
+            try {
+              sessionResponse = await repo.startSession(0);
+            } on DioException catch (e) {
+              if (e.response?.statusCode == 400) {
+                // Backend says there's an active session — try to force-stop it
+                debugPrint('⚠️ Active session exists on server, attempting to close orphan...');
+                
+                // Try to stop with empty/dummy data so backend closes the orphan
+                try {
+                  // Some backends accept stop without a valid sessionId for the current user
+                  await repo.stopSession(
+                    sessionId: 'force-close',
+                    finalSteps: 0,
+                    finalCalories: 0,
+                    finalDistance: 0.0,
+                  );
+                  debugPrint('🧹 Orphan session force-closed');
+                } catch (stopErr) {
+                  debugPrint('⚠️ Force-close failed: $stopErr (backend may auto-close on retry)');
+                }
+                
+                // Wait a moment then retry start
+                await Future.delayed(const Duration(milliseconds: 500));
+                sessionResponse = await repo.startSession(0);
+                debugPrint('🔄 Retry start succeeded!');
+              } else {
+                rethrow; // Not a 400, let outer catch handle it
+              }
+            }
+            
             final sessionId = sessionResponse['sessionId'] ?? sessionResponse['id'] ?? '';
-            debugPrint('🟢 Session started: $sessionId');
+            final httpStatus = sessionResponse['_httpStatus'] ?? 201;
+            
+            if (sessionId.toString().isEmpty) {
+              throw Exception('No sessionId returned from server');
+            }
+            
+            debugPrint('🟢 Session ${httpStatus == 200 ? "RESUMED" : "CREATED"}: $sessionId');
             
             await prefs.setString('active_session_id', sessionId.toString());
             
@@ -3672,9 +3841,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             
             debugPrint('========= SESSION STARTED VERIFIED =========');
             if (mounted) {
+              final msg = httpStatus == 200
+                  ? '🔄 Session resumed!'
+                  : '⚡ Tracking session started!';
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('⚡ Tracking session started!', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600)),
+                  content: Text(msg, style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600)),
                   backgroundColor: _T.green,
                   behavior: SnackBarBehavior.floating,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -3684,17 +3856,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               );
             }
           } else {
-            // STOP
+            // ── STOP SESSION ──────────────────────────────
             service.invoke('stopService');
             
             // Stop auto-refreshing stats
             ref.read(dashboardProvider.notifier).stopAutoRefresh();
             
-            // Save final steps BEFORE stopping (so hero card doesn't show 0)
+            // Capture final step counts BEFORE resetting pedometer
             final livePedometerSteps = ref.read(pedometerProvider).value ?? 0;
             final prevApiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
-            _lastCompletedSteps = prevApiSteps.toInt() + livePedometerSteps;
-            // Persist to survive navigation
+            final totalSteps = prevApiSteps.toInt() + livePedometerSteps;
+            
+            // Save for hero card display (so it doesn't drop to 0)
+            // NEVER decrease — steps only go up within a day
+            _lastCompletedSteps = math.max(_lastCompletedSteps, totalSteps);
             SharedPreferences.getInstance().then((p) {
               final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
               p.setInt('completed_steps_today', _lastCompletedSteps);
@@ -3702,22 +3877,32 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             });
             debugPrint('💾 Saved completed steps: $_lastCompletedSteps');
             
-            // Freeze the step counter
+            // NOW freeze the step counter (after capturing the value)
             ref.read(pedometerProvider.notifier).stopSession();
             
-            final sessionIdToStop = prefs.getString('active_session_id') ?? existingSessionId;
+            final sessionIdToStop = prefs.getString('active_session_id') ?? '';
             
             if (sessionIdToStop.isNotEmpty) {
-              final finalSteps = ref.read(pedometerProvider).value ?? 0;
+              // Use session-specific steps only (NOT totalSteps which includes previous sessions)
+              final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
+              // BG service tracks session steps most accurately; pedometer is fallback
+              final finalSteps = math.max(bgAccumulatedSteps, livePedometerSteps);
               final finalCalories = (finalSteps * 0.045).round();
               final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
               
-              await repo.stopSession(
-                sessionId: sessionIdToStop,
-                finalSteps: finalSteps,
-                finalCalories: finalCalories,
-                finalDistance: finalDistance,
-              );
+              debugPrint('📊 Stop: live=$livePedometerSteps, api=${prevApiSteps.toInt()}, bg=$bgAccumulatedSteps, final=$finalSteps, display=$_lastCompletedSteps');
+              
+              try {
+                await repo.stopSession(
+                  sessionId: sessionIdToStop,
+                  finalSteps: finalSteps,
+                  finalCalories: finalCalories,
+                  finalDistance: finalDistance,
+                );
+              } catch (e) {
+                debugPrint('⚠️ Stop session API failed (session may have been auto-closed): $e');
+                // Don't throw — session might have been auto-closed by backend
+              }
             }
             
             // Clear sessionId
@@ -3743,10 +3928,34 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             }
           }
         } catch (e) {
-          if (e is provider.ProviderNotFoundException) {} // Ignore
-          debugPrint('START/STOP FAILED: $e');
+          // On ANY error during start/stop, reset UI so user can retry
+          debugPrint('❌ START/STOP FAILED: $e');
           if (e is DioException) {
-            debugPrint('ERROR RESPONSE: ${e.response?.data}');
+            debugPrint('❌ Status: ${e.response?.statusCode}');
+            debugPrint('❌ Response: ${e.response?.data}');
+          }
+          
+          // Reset tracking state so user isn't stuck
+          if (mounted) {
+            setState(() {
+              _isTracking = !shouldStart; // revert the toggle
+              if (!_isTracking) {
+                _ac.stop(); _glowAc.stop();
+              }
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  shouldStart ? 'Failed to start session. Please try again.' : 'Failed to stop session. Please try again.',
+                  style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600),
+                ),
+                backgroundColor: Colors.redAccent,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                margin: const EdgeInsets.all(16),
+                duration: const Duration(seconds: 3),
+              )
+            );
           }
         }
       },
