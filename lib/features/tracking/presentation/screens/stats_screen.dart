@@ -46,6 +46,10 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
   late int _selectedPeriod;
   int _listTab       = 0;
   int _activeCard    = 0; // 0=Steps, 1=Distance, 2=Calories
+  int _currentPhaseLevel = 0; // persisted phase level (same as dashboard)
+
+  // Phase goals matching dashboard
+  static const _phaseGoals = [5000, 7000, 10000, 12000, 15000];
 
   // ══════════════════════════════════════════════════════════
   //  API-ALIGNED DATA — maps to real server response schemas
@@ -59,7 +63,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
   double get _todayCalories  => ((_todayData?['calories'] ?? 0) as num).toDouble();
   double get _todayDistance  => ((_todayData?['distance'] ?? 0) as num).toDouble();
   int    get _todayActive    => (_todayData?['activeMinutes'] ?? 0) as int;
-  int    get _todayGoal      => (_todayData?['goalSteps'] ?? 10000) as int;
+  int    get _todayGoal      => _phaseGoals[_currentPhaseLevel.clamp(0, 4)];
   double get _todayProgress  => ((_todayData?['goalProgress'] ?? 0) as num).toDouble();
 
   // ── Hourly step data (loaded async from SharedPreferences) ──
@@ -374,8 +378,16 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
   void initState() {
     super.initState();
     _selectedPeriod = 0; // Start on THIS WEEK / TODAY / current month
+    _loadPhaseLevel(); // load persisted phase level
     // Trigger a fresh API fetch when stats screen opens
     Future.microtask(() => ref.read(dashboardProvider.notifier).refresh());
+  }
+
+  /// Load persisted phase level from SharedPreferences
+  Future<void> _loadPhaseLevel() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getInt('current_phase_level') ?? 0;
+    if (mounted) setState(() => _currentPhaseLevel = saved);
   }
 
   void _switchTab(int i) {

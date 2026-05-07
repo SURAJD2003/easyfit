@@ -1421,6 +1421,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   bool _isTracking = false; // ← play/pause state
   int _lastCompletedSteps = 0; // steps from last stopped session (survive cross-check zero)
   
+  // Persisted phase level (0=Activation, 1=FatLoss, 2=Metabolic, 3=Transformation, 4=LimitZone)
+  // Only advances after 3 consecutive days of meeting the current phase goal.
+  int _currentPhaseLevel = 0;
+  
   // Morning habit completion state (per-day)
   bool _habitTablet = false;
   bool _habitWater = false;
@@ -1457,6 +1461,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     _loadHabitState();
     _scheduleMidnightReset();
     _loadCompletedSteps(); // restore persisted step count after navigation/restart
+    _loadPhaseLevel(); // restore persisted phase level
     
     // Attach milestone controller & listen for milestones
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -3059,18 +3064,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       padding: const EdgeInsets.fromLTRB(22, 18, 22, 0),
       child: Row(
         children: [
-          GestureDetector(
-            onTap: () => Scaffold.of(context).openDrawer(),
-            child: Container(
-              width: 38, height: 38,
-              margin: const EdgeInsets.only(right: 12),
-              decoration: BoxDecoration(
-                color: _T.card,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.menu_rounded, color: _T.accent, size: 22),
-            ),
-          ),
+
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -3081,15 +3075,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               ],
             ),
           ),
-          GestureDetector(
-            onTap: _openSearch,
-            child: Container(
-              width: 38, height: 38,
-              decoration: BoxDecoration(color: _T.card, borderRadius: BorderRadius.circular(12)),
-              child: const Icon(Icons.search_rounded, color: _T.mid, size: 20),
-            ),
-          ),
-          const SizedBox(width: 10),
+
           GestureDetector(
             onTap: _openProfile,
             child: Container(
@@ -3105,14 +3091,94 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     );
   }
 
+  // ── PHASE PERSISTENCE ────────────────────────────────────
+  /// Load persisted phase level from SharedPreferences
+  Future<void> _loadPhaseLevel() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getInt('current_phase_level') ?? 0;
+    if (mounted) setState(() => _currentPhaseLevel = saved);
+  }
+
+  /// Save current phase level to SharedPreferences
+  Future<void> _savePhaseLevel(int level) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('current_phase_level', level);
+  }
+
+  /// Check weekly data and promote phase if user has 3 consecutive days
+  /// of completing the current phase goal.
+  void _checkPhasePromotion(List<dynamic> daysList, int currentSteps) {
+    if (_currentPhaseLevel >= 4) return; // already at Limit Zone
+    final goal = _getPhaseGoalForLevel(_currentPhaseLevel);
+    
+    // Count consecutive days (most recent first) where user met the goal
+    final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    int consecutiveDays = 0;
+    
+    // Check today first
+    if (currentSteps >= goal) {
+      consecutiveDays = 1;
+    } else {
+      return; // today not met, can't have 3 consecutive ending today
+    }
+    
+    // Walk backwards through weekly data
+    for (int i = daysList.length - 1; i >= 0; i--) {
+      final d = daysList[i] as Map<String, dynamic>;
+      final dateStr = d['date'] ?? '';
+      if (dateStr == todayStr) continue; // already counted
+      final daySteps = (d['steps'] ?? 0) as int;
+      if (daySteps >= goal) {
+        consecutiveDays++;
+      } else {
+        break;
+      }
+    }
+    
+    // Promote if 3+ consecutive days
+    if (consecutiveDays >= 3 && _currentPhaseLevel < 4) {
+      final newLevel = _currentPhaseLevel + 1;
+      setState(() => _currentPhaseLevel = newLevel);
+      _savePhaseLevel(newLevel);
+      debugPrint('🎯 Phase promoted! Level $newLevel after $consecutiveDays consecutive days');
+    }
+  }
+
   // ── STEP PHASE HELPER ──────────────────────────────────
-  /// Returns the phase name and next-phase info based on current step count.
-  /// Phases:
-  ///   0 – 5000     → Activation Phase
-  ///   5001 – 7000  → Fat Loss Phase
-  ///   7001 – 10000 → Metabolic Phase
-  ///  10001 – 12000 → Transformation Phase
-  ///  12000+        → Limit Zone
+  /// Phase names by level index
+  static const _phaseNames = [
+    'Activation Phase',     // level 0: goal 5000
+    'Fat Loss Phase',       // level 1: goal 7000
+    'Metabolic Phase',      // level 2: goal 10000
+    'Transformation Phase', // level 3: goal 12000
+    'Limit Zone',           // level 4: goal 15000 (max)
+  ];
+  static const _phaseGoals = [5000, 7000, 10000, 12000, 15000];
+
+  /// Get phase name from the persisted level
+  static String _getPhaseNameForLevel(int level) {
+    return _phaseNames[level.clamp(0, 4)];
+  }
+
+  /// Get goal for a phase level
+  static int _getPhaseGoalForLevel(int level) {
+    return _phaseGoals[level.clamp(0, 4)];
+  }
+
+  /// Get next phase name (null if at max)
+  static String? _getNextPhaseNameForLevel(int level) {
+    if (level >= 4) return null;
+    return _phaseNames[level + 1];
+  }
+
+  /// Steps remaining to complete the current phase goal
+  static int _stepsToCompleteGoal(int steps, int level) {
+    final goal = _getPhaseGoalForLevel(level);
+    return (goal - steps).clamp(0, goal);
+  }
+
+  // ── LEGACY HELPERS (used by hero card) ─────────────────
+  /// Returns the phase name based on current step count (for display only).
   static String _getPhaseName(int steps) {
     if (steps <= 5000) return 'Activation Phase';
     if (steps <= 7000) return 'Fat Loss Phase';
@@ -3126,7 +3192,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     if (steps <= 7000) return 'Metabolic Phase';
     if (steps <= 10000) return 'Transformation Phase';
     if (steps <= 12000) return 'Limit Zone';
-    return null; // already at max
+    return null;
   }
 
   static int _stepsToNextPhase(int steps) {
@@ -3137,13 +3203,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     return 0;
   }
 
-  /// Goal for each phase (the upper limit of that phase)
-  static int _getPhaseGoal(int steps) {
-    if (steps <= 5000) return 5000;
-    if (steps <= 7000) return 7000;
-    if (steps <= 10000) return 10000;
-    if (steps <= 12000) return 12000;
-    return 15000; // Limit Zone stretch goal
+  /// Goal for each phase — now uses persisted level
+  int _getPhaseGoal(int steps) {
+    return _getPhaseGoalForLevel(_currentPhaseLevel);
   }
 
   // ── HERO CARD ────────────────────────────────────────────
@@ -3323,20 +3385,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final apiSteps = (state.todayActivity?['steps'] ?? 0) as int;
     final liveSteps = ref.watch(pedometerProvider).valueOrNull ?? 0;
     final currentSteps = [apiSteps, liveSteps, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
-    final currentPhase = _getPhaseName(currentSteps);
-    final nextPhase = _getNextPhaseName(currentSteps);
-    final remaining = _stepsToNextPhase(currentSteps);
+    
+    // Use persisted phase level (advances only after 3 consecutive days)
+    final currentPhase = _getPhaseNameForLevel(_currentPhaseLevel);
+    final nextPhase = _getNextPhaseNameForLevel(_currentPhaseLevel);
+    final phaseGoal = _getPhaseGoalForLevel(_currentPhaseLevel);
+    final remaining = _stepsToCompleteGoal(currentSteps, _currentPhaseLevel);
 
     // Calculate streak: how many consecutive days (including today) the user
-    // has been in the current phase, using the weekly stats daily data.
+    // completed the current phase goal.
     final weeklyData = state.weeklyStats ?? {};
     final daysList = (weeklyData['days'] as List<dynamic>?) ?? [];
 
-    // Build a list of per-day steps from the API (most recent last)
-    // Then walk backwards from today counting consecutive days where
-    // the user COMPLETED the current phase goal (steps >= phaseGoal).
-    final phaseGoal = _getPhaseGoal(currentSteps);
-    int streakDays = 0; // today only counts if goal is met
+    int streakDays = 0;
     
     // Check if today's steps meet the goal
     if (currentSteps >= phaseGoal) {
@@ -3344,23 +3405,25 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     }
     
     if (daysList.isNotEmpty) {
-      // daysList is ordered oldest → newest; walk backwards skipping today
       for (int i = daysList.length - 1; i >= 0; i--) {
         final d = daysList[i] as Map<String, dynamic>;
         final dateStr = d['date'] ?? '';
-        // Skip today — we already checked it above
         final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
         if (dateStr == todayStr) continue;
         final daySteps = (d['steps'] ?? 0) as int;
-        // Day counts only if user completed the phase goal
         if (daySteps >= phaseGoal) {
           streakDays++;
         } else {
-          break; // streak broken (didn't complete goal)
+          break;
         }
       }
     }
     streakDays = streakDays.clamp(0, 7);
+
+    // Check for phase promotion (3 consecutive days)
+    if (daysList.isNotEmpty) {
+      _checkPhasePromotion(daysList, currentSteps);
+    }
 
     // Build day labels: last 7 days ending at today (today = rightmost)
     final allDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -3374,8 +3437,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     // Mark streak days: count backwards from today (index 6)
     final doneIndices = List.generate(streakDays, (i) => 6 - i);
 
+    // Show how many days of consistency achieved out of 3 needed
+    final daysNeeded = 3;
     final streakSubtitle = nextPhase != null
-        ? '$streakDays day streak! $remaining steps to $nextPhase'
+        ? (streakDays >= daysNeeded
+            ? '🎯 $streakDays day streak! Advancing to $nextPhase'
+            : '$streakDays/$daysNeeded days to unlock $nextPhase • ${remaining > 0 ? "$remaining steps left today" : "✅ Today\'s goal done!"}')
         : '🔥 $streakDays day streak in Limit Zone!';
 
     return Padding(
@@ -3656,10 +3723,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           _profileTile(Icons.workspace_premium_rounded, 'Subscription', badge: 'Free'),
           const SizedBox(height: 8),
           _profileTile(Icons.logout_rounded, 'Sign Out', danger: true, onTap: () async {
-            Navigator.pop(context); // close sheet
+            Navigator.pop(context);
             final authProv = provider.Provider.of<AuthProvider>(context, listen: false);
             await authProv.logoutApi();
-            // Stop background service if tracking
             FlutterBackgroundService().invoke('stopService');
             if (mounted) {
               context.go(RouteNames.login);
@@ -3667,7 +3733,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           }),
           const SizedBox(height: 4),
           _profileTile(Icons.delete_forever_rounded, 'Delete Account', danger: true, onTap: () {
-            Navigator.pop(context); // close profile sheet
+            Navigator.pop(context);
             _showDeleteAccountDialog();
           }),
         ]),
