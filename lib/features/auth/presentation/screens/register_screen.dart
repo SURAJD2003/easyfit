@@ -57,7 +57,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _showSnackBar('Registration successful!');
       await Future.delayed(const Duration(milliseconds: 1000));
       if (mounted) {
-        context.go(RouteNames.dashboard);
+        context.go(RouteNames.subscription);
       }
     } else if (authProvider.status == AuthStatus.error) {
       _showSnackBar(authProvider.errorMessage ?? 'Registration failed');
@@ -254,7 +254,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       children: [
         // Background image
         Image.asset(
-          'images/runner.png',
+          'assets/images/runner.png',
           height: size.height * 0.25,
           width: double.infinity,
           fit: BoxFit.cover,
@@ -554,7 +554,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Image.asset(
-              'icons/google.png',
+              'assets/icons/google.png',
               height: 20,
               width: 20,
               errorBuilder: (context, error, stackTrace) {

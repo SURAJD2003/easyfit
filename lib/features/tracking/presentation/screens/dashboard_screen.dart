@@ -1362,6 +1362,7 @@ import '../../../../core/api_client.dart';
 import '../../../../core/api_constants.dart';
 import '../widgets/milestone_celebration_overlay.dart';
 import '../widgets/report_share_utils.dart';
+import '../../../subscription/presentation/providers/subscription_provider.dart';
 
 
 // ───────────────────────────────────────────
@@ -3653,7 +3654,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           const SizedBox(height: 24),
           Container(height: 1, color: _T.divider),
           const SizedBox(height: 16),
-          _profileTile(Icons.workspace_premium_rounded, 'Subscription', badge: 'Free'),
+          Consumer(
+            builder: (context, ref, child) {
+              final subState = ref.watch(subscriptionProvider);
+              final status = subState.status?.status ?? 'Free';
+              return _profileTile(
+                Icons.workspace_premium_rounded,
+                'Subscription',
+                badge: status.toUpperCase(),
+                onTap: () {
+                  Navigator.pop(context); // close sheet
+                  context.push(RouteNames.subscription);
+                },
+              );
+            },
+          ),
           const SizedBox(height: 8),
           _profileTile(Icons.logout_rounded, 'Sign Out', danger: true, onTap: () async {
             Navigator.pop(context); // close sheet

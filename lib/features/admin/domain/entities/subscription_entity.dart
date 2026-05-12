@@ -3,10 +3,12 @@ class SubscriptionEntity {
   final String userId;
   final String userName;
   final String userEmail;
-  final String plan;       // free / premium
-  final String status;     // pending / approved / rejected
+  final String plan;       
+  final String status;     
   final DateTime? requestedAt;
-  final DateTime? approvedAt;
+  final DateTime? resolvedAt;
+  final String? note;
+  final String? reason;
 
   const SubscriptionEntity({
     required this.id,
@@ -16,6 +18,8 @@ class SubscriptionEntity {
     required this.plan,
     required this.status,
     this.requestedAt,
-    this.approvedAt,
+    this.resolvedAt,
+    this.note,
+    this.reason,
   });
 }

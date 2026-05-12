@@ -7,6 +7,7 @@ class ApiClient {
 
   late final Dio dio;
   String? _token;
+  String? get token => _token;
 
   ApiClient._internal() {
     dio = Dio(BaseOptions(

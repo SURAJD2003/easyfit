@@ -9,27 +9,27 @@ class SubscriptionModel extends SubscriptionEntity {
     required super.plan,
     required super.status,
     super.requestedAt,
-    super.approvedAt,
+    super.resolvedAt,
+    super.note,
+    super.reason,
   });
 
   factory SubscriptionModel.fromJson(Map<String, dynamic> json) {
     return SubscriptionModel(
-      id: json['_id']?.toString() ?? json['id']?.toString() ?? '',
+      id: json['id']?.toString() ?? '',
       userId: json['userId']?.toString() ?? '',
-      userName: json['userName']?.toString() ??
-          json['name']?.toString() ??
-          'Unknown User',
-      userEmail: json['userEmail']?.toString() ??
-          json['email']?.toString() ??
-          '',
+      userName: json['userName']?.toString() ?? 'Unknown User',
+      userEmail: json['userEmail']?.toString() ?? '',
       plan: json['plan']?.toString() ?? 'free',
       status: json['status']?.toString() ?? 'pending',
       requestedAt: json['requestedAt'] != null
           ? DateTime.tryParse(json['requestedAt'].toString())
           : null,
-      approvedAt: json['approvedAt'] != null
-          ? DateTime.tryParse(json['approvedAt'].toString())
+      resolvedAt: json['resolvedAt'] != null
+          ? DateTime.tryParse(json['resolvedAt'].toString())
           : null,
+      note: json['note']?.toString(),
+      reason: json['reason']?.toString(),
     );
   }
 }

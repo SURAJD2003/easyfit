@@ -13,6 +13,7 @@ abstract class RouteNames {
   static const profile        = '/profile';
   static const editProfile    = '/edit-profile';
   static const subscription   = '/subscription';
+  static const approvalPending = '/approval-pending';
 
   // ─── ADMIN ROUTES ─────────────────────────────────────
   static const admin              = '/admin';
