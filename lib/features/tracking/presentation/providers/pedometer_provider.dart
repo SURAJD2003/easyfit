@@ -151,11 +151,11 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
       await _checkMidnightReset();
       
       state = AsyncValue.data(_accumulatedSteps);
-      debugPrint('🔄 Recovered session: $sessionId with $_accumulatedSteps accumulated steps');
+      debugPrint('🔄 Recovered session: $sessionId with $_accumulatedSteps session steps');
     }
   }
 
-  /// Call when the user presses PLAY
+  /// Call when the user presses PLAY (or auto-start)
   void startSession() {
     _isTracking = true;
     _baseSteps = -1;
@@ -169,6 +169,11 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
     SharedPreferences.getInstance().then((prefs) {
       prefs.setString('session_date', _sessionDate);
     });
+  }
+
+  /// Get the current session steps only (for API stop calls)
+  int get currentSessionSteps {
+    return state.valueOrNull ?? 0;
   }
 
   /// Call when the user presses STOP — freezes the counter

@@ -1418,7 +1418,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   int _tab = 0;
   int _statsSegment = 0; // 0=Day, 1=Week, 2=Month
-  bool _isTracking = false; // ← play/pause state
+  bool _isTracking = true; // always-on tracking (no more play/pause)
   int _lastCompletedSteps = 0; // steps from last stopped session (survive cross-check zero)
   
   // Persisted phase level (0=Activation, 1=FatLoss, 2=Metabolic, 3=Transformation, 4=LimitZone)
@@ -1711,8 +1711,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final prefs = await SharedPreferences.getInstance();
     final sessionId = prefs.getString('active_session_id');
     if (sessionId != null && sessionId.isNotEmpty) {
-      // Resume pedometer tracking (it will recover accumulated steps)
-      // The PedometerNotifier._recoverSession() handles this automatically
+      // Session exists — resume tracking
       if (mounted) {
         setState(() {
           _isTracking = true;
@@ -1729,8 +1728,278 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         service.startService();
       }
       
-      // Start auto-refreshing stats since we have an active session
+      // Start auto-refreshing stats
       ref.read(dashboardProvider.notifier).startAutoRefresh();
+    } else {
+      // No session — AUTO-START one silently
+      debugPrint('🚀 No active session found, auto-starting...');
+      await _autoStartSession();
+    }
+  }
+
+  /// Silently start a new tracking session (no button press needed)
+  Future<void> _autoStartSession() async {
+    try {
+      await Permission.notification.request();
+      await Permission.activityRecognition.request();
+      
+      final prefs = await SharedPreferences.getInstance();
+      final repo = ref.read(trackingRepositoryProvider);
+      final service = FlutterBackgroundService();
+      
+      // Stop any stale background service first
+      service.invoke('stopService');
+      await Future.delayed(const Duration(milliseconds: 300));
+      
+      // Clear stale local session data
+      await prefs.remove('active_session_id');
+      await prefs.remove('session_accumulated_steps');
+      await prefs.setInt('synced_steps_offset', 0);
+      
+      // Reset pedometer & start counting fresh
+      ref.read(pedometerProvider.notifier).startSession();
+      
+      // Start session on backend
+      Map<String, dynamic> sessionResponse;
+      try {
+        sessionResponse = await repo.startSession(0);
+      } on DioException catch (e) {
+        if (e.response?.statusCode == 400) {
+          // Orphan session exists — try to close it first
+          debugPrint('⚠️ Active session exists on server, closing orphan...');
+          try {
+            await repo.stopSession(
+              sessionId: 'force-close',
+              finalSteps: 0,
+              finalCalories: 0,
+              finalDistance: 0.0,
+            );
+          } catch (_) {}
+          await Future.delayed(const Duration(milliseconds: 500));
+          sessionResponse = await repo.startSession(0);
+        } else {
+          rethrow;
+        }
+      }
+      
+      final sessionId = sessionResponse['sessionId'] ?? sessionResponse['id'] ?? '';
+      if (sessionId.toString().isEmpty) {
+        throw Exception('No sessionId returned from server');
+      }
+      
+      debugPrint('🟢 Auto-started session: $sessionId');
+      await prefs.setString('active_session_id', sessionId.toString());
+      
+      // Start background service
+      await Future.delayed(const Duration(milliseconds: 100));
+      service.startService();
+      
+      // Start auto-refreshing
+      ref.read(dashboardProvider.notifier).startAutoRefresh();
+      
+      if (mounted) {
+        setState(() {
+          _isTracking = true;
+          _ac.repeat(reverse: true);
+          _glowAc.repeat(reverse: true);
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Auto-start failed: $e');
+    }
+  }
+
+  /// Silent sync: stop current session → start new one → navigate
+  /// This commits steps to stats/reports without the user pressing anything
+  Future<void> _silentSyncAndNavigate(String route) async {
+    // Show a brief loading indicator
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(children: [
+            const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+            const SizedBox(width: 12),
+            Text('Syncing data...', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600)),
+          ]),
+          backgroundColor: _T.card2,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.all(16),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final repo = ref.read(trackingRepositoryProvider);
+      final sessionIdToStop = prefs.getString('active_session_id') ?? '';
+      
+      if (sessionIdToStop.isNotEmpty) {
+        // IMPORTANT: Stop background service FIRST to prevent race conditions
+        final service = FlutterBackgroundService();
+        service.invoke('stopService');
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        // Get the values
+        final livePedometerSteps = ref.read(pedometerProvider).value ?? 0;
+        final sessionSteps = ref.read(pedometerProvider.notifier).currentSessionSteps;
+        final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
+        // The true session steps is the max of the foreground and the background
+        final finalSteps = math.max(sessionSteps, bgAccumulatedSteps);
+        final finalCalories = (finalSteps * 0.045).round();
+        final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
+        
+        debugPrint('📊 Silent sync: sessionSteps=$sessionSteps, liveDisplay=$livePedometerSteps, final=$finalSteps');
+        
+        // STOP session → commits to backend stats/reports
+        try {
+          await repo.stopSession(
+            sessionId: sessionIdToStop,
+            finalSteps: finalSteps,
+            finalCalories: finalCalories,
+            finalDistance: finalDistance,
+          );
+        } catch (e) {
+          debugPrint('⚠️ Stop session API failed: $e');
+        }
+        
+        // Calculate the exact total steps the user sees on the screen right now
+        final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
+        final baseSteps = apiSteps.toInt() >= _lastCompletedSteps ? apiSteps.toInt() : _lastCompletedSteps;
+        final totalDisplaySteps = baseSteps + sessionSteps;
+        
+        // Save the total as _lastCompletedSteps so the UI doesn't drop to 0 while waiting for API refresh
+        _lastCompletedSteps = math.max(_lastCompletedSteps, totalDisplaySteps);
+        final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+        await prefs.setInt('completed_steps_today', _lastCompletedSteps);
+        await prefs.setString('completed_steps_date', today);
+        
+        // Clear old session
+        await prefs.remove('active_session_id');
+        await prefs.remove('session_accumulated_steps');
+        
+        // START a new session immediately
+        ref.read(pedometerProvider.notifier).startSession();
+        
+        Map<String, dynamic> sessionResponse;
+        try {
+          sessionResponse = await repo.startSession(0);
+        } on DioException catch (e) {
+          if (e.response?.statusCode == 400) {
+            try {
+              await repo.stopSession(sessionId: 'force-close', finalSteps: 0, finalCalories: 0, finalDistance: 0.0);
+            } catch (_) {}
+            await Future.delayed(const Duration(milliseconds: 500));
+            sessionResponse = await repo.startSession(0);
+          } else {
+            rethrow;
+          }
+        }
+        
+        final newSessionId = sessionResponse['sessionId'] ?? sessionResponse['id'] ?? '';
+        if (newSessionId.toString().isNotEmpty) {
+          await prefs.setString('active_session_id', newSessionId.toString());
+          debugPrint('🟢 Silent sync done. New session: $newSessionId');
+        }
+        
+        // Restart background service with new session
+        service.startService();
+      }
+      
+      // Refresh dashboard data
+      await ref.read(dashboardProvider.notifier).refresh();
+      
+    } catch (e) {
+      debugPrint('❌ Silent sync failed: $e');
+    }
+    
+    // Navigate to the target screen
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      context.go(route);
+    }
+  }
+
+  /// Silent sync without navigation (for in-page tabs like Reports)
+  Future<void> _silentSyncForTab() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final repo = ref.read(trackingRepositoryProvider);
+      final sessionIdToStop = prefs.getString('active_session_id') ?? '';
+      
+      if (sessionIdToStop.isNotEmpty) {
+        // IMPORTANT: Stop background service FIRST to prevent race conditions
+        final service = FlutterBackgroundService();
+        service.invoke('stopService');
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        // Get the values
+        final livePedometerSteps = ref.read(pedometerProvider).value ?? 0;
+        final sessionSteps = ref.read(pedometerProvider.notifier).currentSessionSteps;
+        final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
+        final finalSteps = math.max(sessionSteps, bgAccumulatedSteps);
+        final finalCalories = (finalSteps * 0.045).round();
+        final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
+        
+        // STOP session
+        try {
+          await repo.stopSession(
+            sessionId: sessionIdToStop,
+            finalSteps: finalSteps,
+            finalCalories: finalCalories,
+            finalDistance: finalDistance,
+          );
+        } catch (e) {
+          debugPrint('⚠️ Silent tab sync stop failed: $e');
+        }
+        
+        // Calculate total display steps
+        final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
+        final baseSteps = apiSteps.toInt() >= _lastCompletedSteps ? apiSteps.toInt() : _lastCompletedSteps;
+        final totalDisplaySteps = baseSteps + sessionSteps;
+        
+        // Save
+        _lastCompletedSteps = math.max(_lastCompletedSteps, totalDisplaySteps);
+        final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+        await prefs.setInt('completed_steps_today', _lastCompletedSteps);
+        await prefs.setString('completed_steps_date', today);
+        
+        // Clear old session
+        await prefs.remove('active_session_id');
+        await prefs.remove('session_accumulated_steps');
+        
+        // START new session
+        ref.read(pedometerProvider.notifier).startSession();
+        
+        Map<String, dynamic> sessionResponse;
+        try {
+          sessionResponse = await repo.startSession(0);
+        } on DioException catch (e) {
+          if (e.response?.statusCode == 400) {
+            try {
+              await repo.stopSession(sessionId: 'force-close', finalSteps: 0, finalCalories: 0, finalDistance: 0.0);
+            } catch (_) {}
+            await Future.delayed(const Duration(milliseconds: 500));
+            sessionResponse = await repo.startSession(0);
+          } else {
+            rethrow;
+          }
+        }
+        
+        final newSessionId = sessionResponse['sessionId'] ?? sessionResponse['id'] ?? '';
+        if (newSessionId.toString().isNotEmpty) {
+          await prefs.setString('active_session_id', newSessionId.toString());
+        }
+        
+        // Restart background service with new session
+        service.startService();
+      }
+      
+      // Refresh dashboard data
+      await ref.read(dashboardProvider.notifier).refresh();
+    } catch (e) {
+      debugPrint('❌ Silent tab sync failed: $e');
     }
   }
 
@@ -1859,7 +2128,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       body: SafeArea(bottom: false, child: _body(state, sessionSteps)),
       bottomNavigationBar: _bottomPill(),
       // FAB only on Home tab
-      floatingActionButton: _tab == 0 ? _continueFab() : null,
+      floatingActionButton: null,
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
     );
   }
@@ -3220,7 +3489,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         : _lastCompletedSteps;
     
     // When tracking, add live session steps on top of what server knows
-    final steps = _isTracking ? (baseSteps + sessionSteps) : baseSteps;
+    final steps = baseSteps + sessionSteps;
     
     // Fallback: If API gave us 0 calories, dynamically generate it based on total steps
     if (rawCalories == 0.0 || rawCalories == 0) {
@@ -4172,9 +4441,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   Widget _navItem(int idx, IconData icon, String label) {
     final active = _tab == idx;
     return GestureDetector(
-      onTap: () {
+      onTap: () async {
         HapticFeedback.selectionClick();
-        if (idx == 2) { context.go(RouteNames.stats); }
+        if (idx == 1) {
+          // Reports tab — silent sync first, then switch tab
+          await _silentSyncForTab();
+          if (mounted) setState(() => _tab = idx);
+        }
+        else if (idx == 2) { _silentSyncAndNavigate(RouteNames.stats); }
         else if (idx == 3) { context.go(RouteNames.you); }
         else { setState(() => _tab = idx); }
       },

@@ -96,31 +96,51 @@ void onStart(ServiceInstance service) async {
       debugPrint('🌙 Midnight crossed! Resetting steps for new day ($sessionDate → $today)');
       
       final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token') ?? '';
+      final currentSessionId = prefs.getString('active_session_id') ?? '';
       
-      // Save final steps for the old day by doing a final sync
+      // Save final steps for the old day by doing a STOP session
       final totalSteps = accumulatedBefore + currentSteps;
-      if (totalSteps > 0 && lastSyncedTotal != totalSteps) {
+      if (totalSteps > 0 && currentSessionId.isNotEmpty && token.isNotEmpty) {
         try {
-          final token = prefs.getString('auth_token') ?? '';
-          final currentSessionId = prefs.getString('active_session_id') ?? '';
-          if (token.isNotEmpty && currentSessionId.isNotEmpty) {
-            final dio = Dio(BaseOptions(
-              baseUrl: 'https://api.theeasyfitclinics.com/api',
-              headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'Authorization': 'Bearer $token',
-              },
-            ));
-            await dio.post('/activity/sync', data: {
-              'sessionId': currentSessionId,
-              'steps': totalSteps,
-              'calories': (totalSteps * 0.045).round(),
-              'distance': double.parse((totalSteps * 0.000762).toStringAsFixed(3)),
-              'timestamp': DateTime.now().subtract(const Duration(seconds: 1)).toIso8601String(),
-            });
+          final dio = Dio(BaseOptions(
+            baseUrl: 'https://api.theeasyfitclinics.com/api',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          ));
+          
+          // STOP the session → commits steps to stats/reports
+          await dio.patch('/activity/session/stop', data: {
+            'sessionId': currentSessionId,
+            'endTime': DateTime.now().subtract(const Duration(seconds: 1)).toIso8601String(),
+            'finalSteps': totalSteps,
+            'finalCalories': (totalSteps * 0.045).round(),
+            'finalDistance': double.parse((totalSteps * 0.000762).toStringAsFixed(3)),
+          });
+          debugPrint('✅ Midnight: stopped old day session with $totalSteps steps');
+          
+          // START a fresh session for the new day
+          final startResp = await dio.post('/activity/session/start', data: {
+            'startTime': DateTime.now().toIso8601String(),
+            'baselineSteps': 0,
+          });
+          
+          // Parse the new session ID
+          dynamic respData = startResp.data;
+          if (respData is String) {
+            try { respData = await Future.value(respData).then((_) => startResp.data is String ? {} : startResp.data); } catch (_) {}
           }
-        } catch (_) {}
+          final newSessionId = (respData is Map) ? (respData['sessionId'] ?? respData['id'] ?? '') : '';
+          if (newSessionId.toString().isNotEmpty) {
+            await prefs.setString('active_session_id', newSessionId.toString());
+            debugPrint('✅ Midnight: started new day session: $newSessionId');
+          }
+        } catch (e) {
+          debugPrint('⚠️ Midnight stop/start failed: $e');
+        }
       }
       
       // Reset for the new day
@@ -134,9 +154,10 @@ void onStart(ServiceInstance service) async {
       // Persist the reset
       await prefs.setInt('session_accumulated_steps', 0);
       await prefs.setString('session_date', today);
+      await prefs.setInt('synced_steps_offset', 0);
       // Clear hourly step data for the new day
       for (int h = 0; h < 24; h++) {
-        await prefs.remove('hourly_steps_$h');
+        await prefs.remove('hourly_steps_\$h');
       }
       
       updateNotification();
