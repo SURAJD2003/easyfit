@@ -103,11 +103,17 @@ class SubscriptionRemoteDataSource {
 
   // ── Manual Subscription Requests (Without /api prefix) ──
 
-  Future<Map<String, dynamic>> requestSubscription(String planId) async {
+  Future<Map<String, dynamic>> requestSubscription({
+    required String planId,
+    required String planName,
+  }) async {
     try {
       final response = await _baseDio.post(
         ApiConstants.subRequest,
-        data: {'plan': planId},
+        data: {
+          'planId': planId,
+          'plan': planName,
+        },
       );
       return response.data;
     } catch (e) {

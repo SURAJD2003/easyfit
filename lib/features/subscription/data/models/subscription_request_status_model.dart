@@ -18,5 +18,15 @@ class SubscriptionRequestStatusModel {
   }
 
   bool get isPending => status == 'pending';
-  bool get isActive => status == 'active';
+  bool get isActive => status == 'active' || status == 'approved';
+  bool get isRejected => status == 'rejected';
+
+  DateTime? get expiryDate {
+    if (expiresAt == null) return null;
+    try {
+      return DateTime.parse(expiresAt!);
+    } catch (e) {
+      return null;
+    }
+  }
 }

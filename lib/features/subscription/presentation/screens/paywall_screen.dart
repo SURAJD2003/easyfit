@@ -328,7 +328,10 @@ class _PlanCard extends ConsumerWidget {
                 // Submit subscription request (don't care if it fails,
                 // we still move to the pending screen)
                 try {
-                  await ref.read(subscriptionProvider.notifier).submitRequest(plan.planId);
+                  await ref.read(subscriptionProvider.notifier).submitRequest(
+                    planId: plan.planId,
+                    planName: plan.duration,
+                  );
                 } catch (_) {
                   // Even if API fails, still navigate to pending screen
                 }

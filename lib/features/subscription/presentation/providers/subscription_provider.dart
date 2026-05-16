@@ -135,10 +135,16 @@ class SubscriptionNotifier extends StateNotifier<SubscriptionState> {
 
   // ── Manual Request Logic ──
 
-  Future<bool> submitRequest(String planId) async {
+  Future<bool> submitRequest({
+    required String planId,
+    required String planName,
+  }) async {
     state = state.copyWith(isLoading: true, message: null);
     try {
-      final res = await _dataSource.requestSubscription(planId);
+      final res = await _dataSource.requestSubscription(
+        planId: planId,
+        planName: planName,
+      );
       state = state.copyWith(isLoading: false, message: res['message']);
       await fetchRequestStatus();
       return true;
