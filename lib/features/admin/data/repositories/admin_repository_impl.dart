@@ -68,13 +68,13 @@ class AdminRepositoryImpl implements AdminRepository {
   }
 
   @override
-  Future<void> approveSubscription({required String subId}) async {
-    await remoteDataSource.approveSubscription(token: token, subId: subId);
+  Future<void> approveSubscription({required String subId, String? note}) async {
+    await remoteDataSource.approveSubscription(token: token, subId: subId, note: note);
   }
 
   @override
-  Future<void> rejectSubscription({required String subId}) async {
-    await remoteDataSource.rejectSubscription(token: token, subId: subId);
+  Future<void> rejectSubscription({required String subId, String? reason}) async {
+    await remoteDataSource.rejectSubscription(token: token, subId: subId, reason: reason);
   }
 
   @override
@@ -86,6 +86,22 @@ class AdminRepositoryImpl implements AdminRepository {
       token: token,
       subId: subId,
       data: data,
+    );
+  }
+
+  @override
+  Future<void> grantSubscription({
+    required String userId,
+    required String planId,
+    String? expiryDate,
+    String? reason,
+  }) async {
+    await remoteDataSource.grantSubscription(
+      token: token,
+      userId: userId,
+      planId: planId,
+      expiryDate: expiryDate,
+      reason: reason,
     );
   }
 

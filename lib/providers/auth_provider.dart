@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/api_client.dart';
 import '../services/auth_service.dart';
@@ -11,6 +12,7 @@ import '../models/auth/login_response.dart';
 import '../models/auth/logout_request.dart';
 import '../models/auth/forgot_password_request.dart';
 import '../models/api_result.dart';
+import '../features/subscription/data/models/subscription_request_status_model.dart';
 
 enum AuthStatus { idle, loading, success, error }
 
@@ -33,6 +35,45 @@ class AuthProvider extends ChangeNotifier {
   Map<String, dynamic>? get userProfile => _userProfile;
   bool get isLoading => _status == AuthStatus.loading;
   bool get isAuthenticated => _token != null;
+  
+  // Subscription status model (fetched from /subscriptions/status or /subscription/status)
+  SubscriptionRequestStatusModel? _subscriptionRequest;
+  
+  SubscriptionRequestStatusModel? get subscriptionRequest => _subscriptionRequest;
+
+  bool get isApproved {
+    final subStatus = _subscriptionRequest?.status.toLowerCase();
+    
+    // Check profile status safely
+    String? profileStatus;
+    if (_userProfile != null && _userProfile!.containsKey('status')) {
+      profileStatus = _userProfile!['status']?.toString().toLowerCase();
+    }
+    
+    print('DEBUG: isApproved check — subStatus: "$subStatus", profileStatus: "$profileStatus"');
+    
+    // Approved if subscription is active/approved/premium OR if account itself is active
+    return subStatus == 'active' || 
+           subStatus == 'approved' || 
+           subStatus == 'premium' || 
+           profileStatus == 'active';
+  }
+
+  bool get isRejected {
+    return _subscriptionRequest?.isRejected ?? false;
+  }
+
+  bool get isPending {
+    // If authenticated but we don't have status yet, assume pending
+    if (_subscriptionRequest == null && _userProfile == null) return true;
+    
+    // If explicitly approved or rejected, it's not pending anymore
+    if (isApproved || isRejected) return false;
+    
+    // Otherwise, if status is 'pending' or 'free', it's pending approval
+    final s = _subscriptionRequest?.status.toLowerCase() ?? '';
+    return s == 'pending' || s == 'free' || s == '';
+  }
 
   AuthProvider() {
     unawaited(checkAuthStatus());
@@ -42,8 +83,67 @@ class AuthProvider extends ChangeNotifier {
     final result = await _authService.getUserProfile();
     if (result.isSuccess) {
       _userProfile = result.data;
+      print('DEBUG PROFILE: $_userProfile');
       notifyListeners();
+    } else {
+      print('DEBUG PROFILE FETCH FAILED');
     }
+  }
+
+  /// Fetches subscription status from both singular and plural endpoints.
+  /// /subscription/status (singular) is for automated payments.
+  /// /subscriptions/status (plural) is for manual admin-approved requests.
+  Future<void> fetchSubscriptionStatus() async {
+    try {
+      final dio = ApiClient().dio;
+      SubscriptionRequestStatusModel? singularSub;
+      SubscriptionRequestStatusModel? pluralSub;
+
+      // 1. Fetch singular status (automated/paid)
+      try {
+        final responseSingular = await dio.get('/subscription/status');
+        if (responseSingular.statusCode == 200) {
+          final data = responseSingular.data;
+          print('DEBUG SINGULAR STATUS: $data');
+          if (data is Map<String, dynamic>) {
+            singularSub = SubscriptionRequestStatusModel.fromJson(data);
+          }
+        }
+      } catch (e) {
+        print('DEBUG SINGULAR STATUS FETCH FAILED: $e');
+      }
+
+      // 2. Fetch plural status (manual approval)
+      try {
+        final responsePlural = await dio.get('https://api.theeasyfitclinics.com/subscriptions/status');
+        if (responsePlural.statusCode == 200) {
+          final data = responsePlural.data;
+          print('DEBUG PLURAL STATUS: $data');
+          if (data is Map<String, dynamic>) {
+            pluralSub = SubscriptionRequestStatusModel.fromJson(data);
+          }
+        }
+      } catch (e) {
+        print('DEBUG PLURAL STATUS FETCH FAILED: $e');
+      }
+
+      // 3. Logic to determine the active subscription
+      // We prioritize any 'active' or 'approved' status.
+      if (pluralSub != null && (pluralSub.isActive || pluralSub.isRejected)) {
+        _subscriptionRequest = pluralSub;
+      } else if (singularSub != null && singularSub.status != 'free') {
+        _subscriptionRequest = singularSub;
+      } else if (pluralSub != null) {
+        _subscriptionRequest = pluralSub;
+      } else {
+        _subscriptionRequest = singularSub;
+      }
+      
+      print('DEBUG FINAL SUBSCRIPTION STATUS: ${_subscriptionRequest?.status}');
+    } catch (e) {
+      print('DEBUG SUBSCRIPTION STATUS FETCH FAILED: $e');
+    }
+    notifyListeners();
   }
 
   Future<void> checkAuthStatus() async {
@@ -204,12 +304,20 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void logout() {
+  Future<void> logout() async {
     _token = null;
     _refreshToken = null;
+    _userProfile = null;
+    _subscriptionRequest = null;
     _status = AuthStatus.idle;
     _registerResponse = null;
     _errorMessage = null;
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('auth_token');
+    await prefs.remove('auth_refresh_token');
+    ApiClient().clearToken();
+    
     notifyListeners();
   }
 

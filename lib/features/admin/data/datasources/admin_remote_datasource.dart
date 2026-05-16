@@ -182,10 +182,12 @@ class AdminRemoteDataSource {
   Future<void> approveSubscription({
     required String token,
     required String subId,
+    String? note,
   }) async {
     final res = await client.patch(
       Uri.parse('$baseUrl${ApiConstants.adminApproveSubscription(subId)}'),
       headers: _headers(token),
+      body: jsonEncode({'note': note ?? ''}),
     );
     _handleError(res);
   }
@@ -193,13 +195,16 @@ class AdminRemoteDataSource {
   Future<void> rejectSubscription({
     required String token,
     required String subId,
+    String? reason,
   }) async {
     final res = await client.patch(
       Uri.parse('$baseUrl${ApiConstants.adminRejectSubscription(subId)}'),
       headers: _headers(token),
+      body: jsonEncode({'reason': reason ?? ''}),
     );
     _handleError(res);
   }
+
   Future<void> updateSubscription({
     required String token,
     required String subId,
@@ -212,6 +217,27 @@ class AdminRemoteDataSource {
     );
     _handleError(res);
   }
+
+  Future<void> grantSubscription({
+    required String token,
+    required String userId,
+    required String planId,
+    String? expiryDate,
+    String? reason,
+  }) async {
+    final res = await client.patch(
+      Uri.parse('$baseUrl${ApiConstants.adminGrantSubscription(userId)}'),
+      headers: _headers(token),
+      body: jsonEncode({
+        'planId': planId,
+        'expiryDate': expiryDate ?? '',
+        'reason': reason ?? '',
+      }),
+    );
+    _handleError(res);
+  }
+
+
 
   // ─── ANALYTICS ──────────────────────────────────────────────────────────
   Future<AnalyticsModel> getAnalytics({required String token}) async {

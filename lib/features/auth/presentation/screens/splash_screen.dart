@@ -114,14 +114,19 @@ class _SplashScreenState extends State<SplashScreen>
   Future<void> _navigateAfterDelay() async {
     // Explicitly await the auth check from SharedPreferences  
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    await auth.checkAuthStatus(); // Wait for disk read to complete
+    await auth.checkAuthStatus();
+    // Fetch fresh profile and subscription status from server
+    await auth.fetchProfile();
+    await auth.fetchSubscriptionStatus();
     
-    // Still show splash animation for at least 4 seconds
-    await Future.delayed(const Duration(seconds: 4));
     if (!mounted) return;
     
     if (auth.isAuthenticated) {
-      context.go(RouteNames.dashboard);
+      if (auth.isApproved) {
+        context.go(RouteNames.dashboard);
+      } else {
+        context.go(RouteNames.approvalPending);
+      }
     } else {
       context.go(RouteNames.onboarding);
     }

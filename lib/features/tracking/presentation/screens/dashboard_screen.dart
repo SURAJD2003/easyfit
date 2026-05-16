@@ -1362,6 +1362,7 @@ import '../../../../core/api_client.dart';
 import '../../../../core/api_constants.dart';
 import '../widgets/milestone_celebration_overlay.dart';
 import '../widgets/report_share_utils.dart';
+import '../../../subscription/presentation/providers/subscription_provider.dart';
 
 
 // ───────────────────────────────────────────
@@ -2100,7 +2101,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             ListTile(
               leading: const Icon(Icons.person_outline, color: Colors.white70),
               title: const Text('My Profile', style: TextStyle(color: Colors.white70)),
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                Navigator.pop(context);
+                context.push(RouteNames.profile);
+              },
             ),
             ListTile(
               leading: const Icon(Icons.settings_outlined, color: Colors.white70),
@@ -3964,9 +3968,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   void _openProfile() {
     final auth = provider.Provider.of<AuthProvider>(context, listen: false);
     final profile = auth.userProfile;
-    final name = profile?['name'] ?? 'Guest';
+    final name = profile?['name'] ?? 'User';
     final email = profile?['email'] ?? '';
-    final initial = name.isNotEmpty ? name[0].toUpperCase() : 'G';
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
+
+    final subStatus = auth.isApproved 
+        ? (auth.subscriptionRequest?.plan ?? 'Premium') 
+        : (auth.isPending ? 'Pending' : 'Free');
 
     showModalBottomSheet(
       context: context, backgroundColor: Colors.transparent, isScrollControlled: true,
@@ -3977,19 +3985,43 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           Container(width: 36, height: 4, decoration: BoxDecoration(color: _T.lo, borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 24),
           Row(children: [
-            Container(width: 56, height: 56, decoration: const BoxDecoration(shape: BoxShape.circle, gradient: _T.accentGrad),
-              child: Center(child: Text(initial, style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w700, color: Colors.white)))),
+            GestureDetector(
+              onTap: () {
+                Navigator.pop(context);
+                context.push(RouteNames.profile);
+              },
+              child: Container(width: 56, height: 56, decoration: const BoxDecoration(shape: BoxShape.circle, gradient: _T.accentGrad),
+                child: Center(child: Text(initial, style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w700, color: Colors.white)))),
+            ),
             const SizedBox(width: 16),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(name, style: _Txt.title),
-              const SizedBox(height: 3),
-              if (email.isNotEmpty) Text(email, style: _Txt.body),
-            ]),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(name, style: _Txt.title),
+                const SizedBox(height: 3),
+                if (email.isNotEmpty) Text(email, style: _Txt.body),
+              ]),
+            ),
           ]),
           const SizedBox(height: 24),
           Container(height: 1, color: _T.divider),
           const SizedBox(height: 16),
-          _profileTile(Icons.workspace_premium_rounded, 'Subscription', badge: 'Free'),
+          _profileTile(
+            Icons.person_outline_rounded,
+            'Full Profile',
+            onTap: () {
+              Navigator.pop(context);
+              context.push(RouteNames.profile);
+            },
+          ),
+          _profileTile(
+            Icons.workspace_premium_rounded,
+            'Subscription',
+            badge: subStatus.toUpperCase(),
+            onTap: () {
+              Navigator.pop(context);
+              context.push(RouteNames.subscription);
+            },
+          ),
           const SizedBox(height: 8),
           _profileTile(Icons.logout_rounded, 'Sign Out', danger: true, onTap: () async {
             Navigator.pop(context);

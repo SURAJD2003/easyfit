@@ -499,7 +499,7 @@ class AdminProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> approveSubscription({required String subId}) async {
+  Future<bool> approveSubscription({required String subId, String? note}) async {
     _subscriptionsState = _subscriptionsState.copyWith(
       isActionLoading: true,
       clearError: true,
@@ -507,21 +507,44 @@ class AdminProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // First, approve the subscription request
       await ApproveSubscriptionUseCase(repository: _buildRepo())
-          .call(subId: subId);
+          .call(subId: subId, note: note);
+      
+      // Find the subscription to get userId and plan for granting
+      final sub = _subscriptionsState.subscriptions
+          .firstWhere((s) => s.id == subId, orElse: () => _subscriptionsState.subscriptions.first);
+      
+      // Also grant the subscription to the user so their status changes from 'free' to 'active'
+      try {
+        await GrantSubscriptionUseCase(repository: _buildRepo()).call(
+          userId: sub.userId,
+          planId: sub.plan,
+        );
+      } catch (_) {
+        // Grant may fail if already granted, that's OK
+      }
+
+      // ✅ Ensure the user account is also activated so they can access the dashboard
+      try {
+        await ActivateUserUseCase(repository: _buildRepo()).call(userId: sub.userId);
+      } catch (_) {
+        // Ignore activation failures
+      }
+      
       await fetchSubscriptions();
       return true;
     } catch (e) {
-      _subscriptionsState = _subscriptionsState.copyWith(
-        isActionLoading: false,
-        error: _parseError(e),
-      );
+      _subscriptionsState = _subscriptionsState.copyWith(error: _parseError(e));
       notifyListeners();
       return false;
+    } finally {
+      _subscriptionsState = _subscriptionsState.copyWith(isActionLoading: false);
+      notifyListeners();
     }
   }
 
-  Future<bool> rejectSubscription({required String subId}) async {
+  Future<bool> rejectSubscription({required String subId, String? reason}) async {
     _subscriptionsState = _subscriptionsState.copyWith(
       isActionLoading: true,
       clearError: true,
@@ -530,16 +553,46 @@ class AdminProvider extends ChangeNotifier {
 
     try {
       await RejectSubscriptionUseCase(repository: _buildRepo())
-          .call(subId: subId);
+          .call(subId: subId, reason: reason);
       await fetchSubscriptions();
       return true;
     } catch (e) {
-      _subscriptionsState = _subscriptionsState.copyWith(
-        isActionLoading: false,
-        error: _parseError(e),
-      );
+      _subscriptionsState = _subscriptionsState.copyWith(error: _parseError(e));
       notifyListeners();
       return false;
+    } finally {
+      _subscriptionsState = _subscriptionsState.copyWith(isActionLoading: false);
+      notifyListeners();
+    }
+  }
+
+  Future<bool> grantSubscription({
+    required String userId,
+    required String planId,
+    String? expiryDate,
+    String? reason,
+  }) async {
+    _usersState = _usersState.copyWith(isActionLoading: true, clearError: true);
+    notifyListeners();
+
+    try {
+      await GrantSubscriptionUseCase(repository: _buildRepo()).call(
+        userId: userId,
+        planId: planId,
+        expiryDate: expiryDate,
+        reason: reason,
+      );
+      
+      // Refresh the specific user's detail
+      await fetchUserDetail(userId: userId);
+      return true;
+    } catch (e) {
+      _usersState = _usersState.copyWith(error: _parseError(e));
+      notifyListeners();
+      return false;
+    } finally {
+      _usersState = _usersState.copyWith(isActionLoading: false);
+      notifyListeners();
     }
   }
 

@@ -9,6 +9,9 @@ import '../../features/tracking/presentation/screens/dashboard_screen.dart';
 import '../../features/tracking/presentation/screens/you_screen.dart';
 import '../../features/tracking/presentation/screens/stats_screen.dart';
 import '../../features/admin/presentation/screens/index.dart';
+import '../../features/subscription/presentation/screens/paywall_screen.dart';
+import '../../features/auth/presentation/screens/approval_pending_screen.dart';
+import '../../features/profile/presentation/screens/profile_screen.dart';
 import 'route_names.dart';
 
 final appRouter = GoRouter(
@@ -60,6 +63,18 @@ final appRouter = GoRouter(
     GoRoute(
       path: RouteNames.stats,
       builder: (context, state) => const StatsScreen(),
+    ),
+    GoRoute(
+      path: RouteNames.subscription,
+      builder: (context, state) => const PaywallScreen(),
+    ),
+    GoRoute(
+      path: RouteNames.approvalPending,
+      builder: (context, state) => const ApprovalPendingScreen(),
+    ),
+    GoRoute(
+      path: RouteNames.profile,
+      builder: (context, state) => const ProfileScreen(),
     ),
 
     // ─── ADMIN ROUTES ─────────────────────────────────────

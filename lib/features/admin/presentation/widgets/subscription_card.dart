@@ -79,12 +79,12 @@ class SubscriptionCard extends StatelessWidget {
                       : 'N/A',
                 ),
               ),
-              if (subscription.approvedAt != null) ...[
+              if (subscription.resolvedAt != null) ...[
                 const SizedBox(width: 12),
                 Expanded(
                   child: _InfoChip(
-                    label: 'Approved',
-                    value: _formatDate(subscription.approvedAt!),
+                    label: subscription.status == 'approved' ? 'Approved' : 'Resolved',
+                    value: _formatDate(subscription.resolvedAt!),
                   ),
                 ),
               ],

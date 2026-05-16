@@ -272,6 +272,93 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
                 // ── ACTIONS ──
                 Row(
                   children: [
+                    if (user.subscription?.plan.toLowerCase() == 'free' || user.subscription == null)
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 12),
+                          child: _ActionButton(
+                            label: 'Grant Premium',
+                            icon: Icons.workspace_premium_rounded,
+                            color: const Color(0xFFFF6B00),
+                            isLoading: state.isActionLoading,
+                            onTap: () async {
+                              final reasonController = TextEditingController();
+                              String? selectedDate;
+                              
+                              final plan = await showDialog<String>(
+                                context: context,
+                                builder: (context) => SimpleDialog(
+                                  backgroundColor: _cardColor,
+                                  title: const Text('Select Plan to Grant', style: TextStyle(color: Colors.white)),
+                                  children: [
+                                    SimpleDialogOption(
+                                      onPressed: () => Navigator.pop(context, 'plan-monthly'),
+                                      child: const Text('Monthly Plan', style: TextStyle(color: Colors.white70)),
+                                    ),
+                                    SimpleDialogOption(
+                                      onPressed: () => Navigator.pop(context, 'plan-yearly'),
+                                      child: const Text('Yearly Plan', style: TextStyle(color: Colors.white70)),
+                                    ),
+                                  ],
+                                ),
+                              );
+
+                              if (plan != null && mounted) {
+                                // Step 2: Ask for Expiry Date and Reason
+                                final details = await showDialog<Map<String, String>>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    backgroundColor: _cardColor,
+                                    title: const Text('Grant Details', style: TextStyle(color: Colors.white)),
+                                    content: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        TextField(
+                                          controller: TextEditingController(text: '2026-06-01'), // Default for testing
+                                          style: const TextStyle(color: Colors.white),
+                                          decoration: const InputDecoration(
+                                            labelText: 'Expiry Date (YYYY-MM-DD)',
+                                            labelStyle: TextStyle(color: Colors.white38),
+                                          ),
+                                          onChanged: (val) => selectedDate = val,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        TextField(
+                                          controller: reasonController,
+                                          style: const TextStyle(color: Colors.white),
+                                          decoration: const InputDecoration(
+                                            labelText: 'Reason',
+                                            labelStyle: TextStyle(color: Colors.white38),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context, {
+                                          'date': selectedDate ?? '2026-06-01',
+                                          'reason': reasonController.text
+                                        }), 
+                                        child: const Text('Grant')
+                                      ),
+                                    ],
+                                  ),
+                                );
+
+                                if (details != null && mounted) {
+                                  provider.grantSubscription(
+                                    userId: widget.userId, 
+                                    planId: plan,
+                                    expiryDate: details['date'],
+                                    reason: details['reason'],
+                                  );
+                                }
+                              }
+                            },
+                          ),
+                        ),
+                      ),
                     Expanded(
                       child: _ActionButton(
                         label: user.isActive ? 'Suspend Access' : 'Activate User',

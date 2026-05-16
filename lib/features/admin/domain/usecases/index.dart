@@ -10,6 +10,7 @@ export 'get_subscription_detail_usecase.dart';
 export 'approve_subscription_usecase.dart';
 export 'reject_subscription_usecase.dart';
 export 'update_subscription_usecase.dart';
+export 'grant_subscription_usecase.dart';
 export 'get_analytics_usecase.dart';
 export 'broadcast_notification_usecase.dart';
 export 'segment_notification_usecase.dart';

@@ -33,6 +33,57 @@ class _AdminSubscriptionsScreenState
     });
   }
 
+  void _showRejectDialog(BuildContext context, String subId) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('Reject Subscription',
+            style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Enter reason for rejection...',
+            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+            enabledBorder: UnderlineInputBorder(
+                borderSide:
+                    BorderSide(color: Colors.white.withOpacity(0.1))),
+            focusedBorder: const UnderlineInputBorder(
+                borderSide: BorderSide(color: _accent)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel',
+                style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final reason = controller.text.trim();
+              if (reason.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a reason')),
+                );
+                return;
+              }
+              Navigator.pop(ctx);
+              context.read<AdminProvider>().rejectSubscription(
+                    subId: subId,
+                    reason: reason,
+                  );
+            },
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent),
+            child: const Text('Reject'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -195,8 +246,7 @@ class _AdminSubscriptionsScreenState
                                   subId: sub.id)
                               : null,
                           onReject: sub.status == 'pending'
-                              ? () => provider.rejectSubscription(
-                                  subId: sub.id)
+                              ? () => _showRejectDialog(context, sub.id)
                               : null,
                         );
                       },

@@ -39,17 +39,31 @@ class ApiConstants {
   static const String adminProfile = '/admin/profile';
   static const String adminDashboardStats = '/admin/dashboard/stats';
   static const String adminUsers = '/api/admin/users';
-  static const String adminSubscriptions = '/api/admin/subscriptions';
   static const String adminAnalytics = '/api/admin/analytics';
   static const String adminReportsOverview = '/api/admin/reports/overview';
   static const String adminNotificationsBroadcast = '/api/admin/notifications/broadcast';
   static const String adminNotificationsSegment = '/api/admin/notifications/segment';
+  
+  static const String adminSubscriptions = '/admin/subscriptions'; // Corrected: removed /api
 
   static String adminUserDetail(String userId) => '/api/admin/users/$userId';
+  static String adminGrantSubscription(String userId) => 
+      '/api/admin/grantSubscription/$userId'; // New
   static String adminApproveSubscription(String subId) =>
-      '/api/admin/subscriptions/$subId/approve';
+      '/admin/subscriptions/$subId/approve'; // Corrected: removed /api
   static String adminRejectSubscription(String subId) =>
-      '/api/admin/subscriptions/$subId/reject';
+      '/admin/subscriptions/$subId/reject'; // Corrected: removed /api
   static String adminSubscriptionDetail(String subId) =>
-      '/api/admin/subscriptions/$subId';
+      '/admin/subscriptions/$subId'; // Corrected: removed /api
+
+  // ── Subscription ─────────────────────────────────────
+  static const String subscriptionPlans = '/subscription/plans';
+  static const String subscriptionVerify = '/subscription/verify';
+  static const String subscriptionStatus = '/subscription/status';
+  static const String subscriptionCancel = '/subscription/cancel';
+  static const String subscriptionRestore = '/subscription/restore';
+  
+  // User Subscription (alternative endpoints shown in image)
+  static const String subRequest = '/subscriptions/request';
+  static const String subStatus = '/subscriptions/status';
 }

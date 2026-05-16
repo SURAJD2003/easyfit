@@ -4,7 +4,7 @@ class RejectSubscriptionUseCase {
   final AdminRepository repository;
   const RejectSubscriptionUseCase({required this.repository});
 
-  Future<void> call({required String subId}) async {
-    await repository.rejectSubscription(subId: subId);
+  Future<void> call({required String subId, String? reason}) async {
+    await repository.rejectSubscription(subId: subId, reason: reason);
   }
 }

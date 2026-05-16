@@ -48,9 +48,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (authProvider.status == AuthStatus.success) {
         _showSnackBar('Login successful!');
-        await Future.delayed(const Duration(milliseconds: 1000));
+        await authProvider.fetchSubscriptionStatus();
+        await Future.delayed(const Duration(milliseconds: 500));
         if (mounted) {
-          context.go(RouteNames.dashboard);
+          if (authProvider.isApproved) {
+            context.go(RouteNames.dashboard);
+          } else {
+            context.go(RouteNames.approvalPending);
+          }
         }
       } else if (authProvider.status == AuthStatus.error) {
         _showSnackBar(authProvider.errorMessage ?? 'Login failed');
@@ -65,7 +70,13 @@ class _LoginScreenState extends State<LoginScreen> {
       await Future.delayed(const Duration(milliseconds: 1500));
       if (mounted) {
         setState(() => _isLoading = false);
-        context.go(RouteNames.dashboard);
+        // OTP login usually for users, check approval
+        final authProvider = context.read<AuthProvider>();
+        if (authProvider.isApproved) {
+          context.go(RouteNames.dashboard);
+        } else {
+          context.go(RouteNames.approvalPending);
+        }
       }
     }
   }
@@ -176,7 +187,7 @@ class _LoginScreenState extends State<LoginScreen> {
       children: [
         // Background image
         Image.asset(
-          'images/runner.png',
+          'assets/images/runner.png',
           height: size.height * 0.28,
           width: double.infinity,
           fit: BoxFit.cover,
@@ -589,7 +600,7 @@ class _LoginScreenState extends State<LoginScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Image.asset(
-              'icons/google.png',
+              'assets/icons/google.png',
               height: 20,
               width: 20,
               errorBuilder: (context, error, stackTrace) {

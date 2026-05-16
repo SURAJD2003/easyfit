@@ -15,9 +15,10 @@ abstract class AdminRepository {
   // Subscriptions
   Future<List<SubscriptionEntity>> getSubscriptions();
   Future<SubscriptionEntity> getSubscriptionDetail({required String subId});
-  Future<void> approveSubscription({required String subId});
-  Future<void> rejectSubscription({required String subId});
+  Future<void> approveSubscription({required String subId, String? note});
+  Future<void> rejectSubscription({required String subId, String? reason});
   Future<void> updateSubscription({required String subId, required Map<String, dynamic> data});
+  Future<void> grantSubscription({required String userId, required String planId, String? expiryDate, String? reason});
 
   // Analytics
   Future<AnalyticsEntity> getAnalytics();
