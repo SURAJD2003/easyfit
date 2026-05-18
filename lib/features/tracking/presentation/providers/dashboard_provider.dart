@@ -32,7 +32,7 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
   void startAutoRefresh() {
     stopAutoRefresh(); // cancel any existing timer
     _autoRefreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      refreshToday();
+      refresh();
     });
     print('🔄 Auto-refresh started (every 30s)');
   }

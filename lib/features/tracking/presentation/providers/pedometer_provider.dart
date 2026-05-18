@@ -215,6 +215,7 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
   }
 
   void _startListening() {
+    _subscription?.cancel();
     _subscription = Pedometer.stepCountStream.listen(
       (StepCount event) {
         if (!_isTracking) return;
@@ -240,8 +241,20 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
         _syncWithServerThrottled(totalSessionSteps);
       },
       onError: (error) {
-        state = AsyncValue.error(error.toString(), StackTrace.current);
+        debugPrint('⚠️ Pedometer stream error: $error — stream stays alive');
+        // Don't set error state — keep showing last known step count
       },
+      onDone: () {
+        // Stream closed unexpectedly — restart after a short delay
+        debugPrint('⚠️ Pedometer stream closed! Restarting in 2s...');
+        Future.delayed(const Duration(seconds: 2), () {
+          if (_isTracking) {
+            debugPrint('🔄 Restarting pedometer listener...');
+            _startListening();
+          }
+        });
+      },
+      cancelOnError: false, // CRITICAL: keep listening even after transient errors
     );
   }
 
@@ -299,7 +312,7 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
             debugPrint('✅ FG Sync: $sessionSteps steps');
           }
         } catch (e) {
-           // Handle silently
+           debugPrint('❌ FG Sync failed: $e');
         }
       });
     }

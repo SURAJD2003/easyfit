@@ -1610,16 +1610,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     // Sync to server for cross-device
     _syncHabitsToServer();
     
-    HapticFeedback.heavyImpact();
-    
-    // Show celebration for all habits completing
-    MilestoneCelebrationOverlay.show(
-      context,
-      icon: '✅',
-      title: 'All Habits Done!',
-      subtitle: '💊 Tablet · 💧 Water · 🚶 Walk\nGreat start to the day!',
-      accentColor: const Color(0xFF30D158),
-    );
+    // Show celebration ONLY ONCE per day
+    final alreadyShown = prefs.getBool('habit_celebration_shown_$today') ?? false;
+    if (!alreadyShown) {
+      await prefs.setBool('habit_celebration_shown_$today', true);
+      HapticFeedback.heavyImpact();
+      
+      MilestoneCelebrationOverlay.show(
+        context,
+        icon: '✅',
+        title: 'All Habits Done!',
+        subtitle: '💊 Tablet · 💧 Water · 🚶 Walk\nGreat start to the day!',
+        accentColor: const Color(0xFF30D158),
+      );
+    }
   }
 
   /// Schedule a timer to fire at midnight and reset all daily data
@@ -1711,7 +1715,50 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final prefs = await SharedPreferences.getInstance();
     final sessionId = prefs.getString('active_session_id');
     if (sessionId != null && sessionId.isNotEmpty) {
-      // Session exists — resume tracking
+      // Session exists locally — validate with backend by calling startSession
+      // Backend will either resume the same session (if still valid) or
+      // abandon the stale one and return a new session ID
+      try {
+        final repo = ref.read(trackingRepositoryProvider);
+        Map<String, dynamic> sessionResponse;
+        try {
+          sessionResponse = await repo.startSession(0);
+        } on DioException catch (e) {
+          if (e.response?.statusCode == 400) {
+            // Force-close the orphan and retry
+            try {
+              await repo.stopSession(sessionId: 'force-close', finalSteps: 0, finalCalories: 0, finalDistance: 0.0);
+            } catch (_) {}
+            await Future.delayed(const Duration(milliseconds: 500));
+            sessionResponse = await repo.startSession(0);
+          } else {
+            rethrow;
+          }
+        }
+        
+        final validSessionId = sessionResponse['sessionId'] ?? sessionResponse['id'] ?? '';
+        final resumed = sessionResponse['resumed'] ?? false;
+        
+        if (validSessionId.toString().isNotEmpty) {
+          // Update local session ID (might be the same or a new one)
+          await prefs.setString('active_session_id', validSessionId.toString());
+          
+          if (!resumed) {
+            // Backend gave us a NEW session (old one was stale) — reset local counters
+            debugPrint('🔄 Stale session detected, got fresh session: $validSessionId');
+            await prefs.setInt('session_accumulated_steps', 0);
+            ref.read(pedometerProvider.notifier).startSession();
+          } else {
+            debugPrint('✅ Session resumed: $validSessionId');
+            // Restore pedometer counting for resumed session
+            ref.read(pedometerProvider.notifier).startSession();
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Session validation failed: $e — using local session');
+      }
+      
+      // Session valid — resume tracking UI
       if (mounted) {
         setState(() {
           _isTracking = true;
@@ -1740,8 +1787,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   /// Silently start a new tracking session (no button press needed)
   Future<void> _autoStartSession() async {
     try {
-      await Permission.notification.request();
-      await Permission.activityRecognition.request();
+      // Note: permissions are already requested by pedometer_provider on init
       
       final prefs = await SharedPreferences.getInstance();
       final repo = ref.read(trackingRepositoryProvider);
@@ -1852,6 +1898,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         
         debugPrint('📊 Silent sync: sessionSteps=$sessionSteps, liveDisplay=$livePedometerSteps, final=$finalSteps');
         
+        // SYNC first — ensures backend has latest steps even if stopSession fails
+        try {
+          await repo.syncSteps(
+            sessionId: sessionIdToStop,
+            steps: finalSteps,
+            calories: finalCalories,
+            distance: finalDistance,
+          );
+          debugPrint('✅ Pre-stop sync sent: $finalSteps steps');
+        } catch (e) {
+          debugPrint('⚠️ Pre-stop sync failed: $e');
+        }
+        
         // STOP session → commits to backend stats/reports
         try {
           await repo.stopSession(
@@ -1941,6 +2000,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         final finalSteps = math.max(sessionSteps, bgAccumulatedSteps);
         final finalCalories = (finalSteps * 0.045).round();
         final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
+        
+        // SYNC first — ensures backend has latest steps even if stopSession fails
+        try {
+          await repo.syncSteps(
+            sessionId: sessionIdToStop,
+            steps: finalSteps,
+            calories: finalCalories,
+            distance: finalDistance,
+          );
+          debugPrint('✅ Pre-stop tab sync sent: $finalSteps steps');
+        } catch (e) {
+          debugPrint('⚠️ Pre-stop tab sync failed: $e');
+        }
         
         // STOP session
         try {
@@ -3499,7 +3571,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     
     final goal = _getPhaseGoal(steps);
     final progress = (steps / goal).clamp(0.0, 1.0);
-    final phaseName = _getPhaseName(steps);
+    final phaseName = _getPhaseNameForLevel(_currentPhaseLevel);
     
     return Padding(
       padding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
