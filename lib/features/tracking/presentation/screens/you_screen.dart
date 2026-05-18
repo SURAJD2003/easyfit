@@ -66,11 +66,11 @@ class _YouScreenState extends State<YouScreen> {
     final initial = name.isNotEmpty ? name[0].toUpperCase() : 'G';
 
     final phaseData = [
-      {'icon': Icons.rocket_launch_rounded, 'name': 'Activation Phase', 'range': '0 – 5,000 steps', 'color': const Color(0xFF4FC3F7), 'level': 0},
-      {'icon': Icons.local_fire_department_rounded, 'name': 'Fat Loss Phase', 'range': '5,001 – 7,000 steps', 'color': const Color(0xFFFF6B2B), 'level': 1},
-      {'icon': Icons.flash_on_rounded, 'name': 'Metabolic Phase', 'range': '7,001 – 10,000 steps', 'color': const Color(0xFFFFCC00), 'level': 2},
-      {'icon': Icons.fitness_center_rounded, 'name': 'Transformation Phase', 'range': '10,001 – 12,000 steps', 'color': const Color(0xFFBF5AF2), 'level': 3},
-      {'icon': Icons.emoji_events_rounded, 'name': 'Limit Zone', 'range': '12,000+ steps', 'color': const Color(0xFFFF2D55), 'level': 4},
+      {'icon': Icons.rocket_launch_rounded,         'name': 'Activation Phase',     'range': '0 – 5,000 steps',       'color': const Color(0xFF4FC3F7), 'level': 0},
+      {'icon': Icons.local_fire_department_rounded, 'name': 'Fat Loss Phase',        'range': '5,001 – 7,000 steps',   'color': const Color(0xFFFF6B2B), 'level': 1},
+      {'icon': Icons.bolt_rounded,                  'name': 'Metabolic Phase',       'range': '7,001 – 10,000 steps',  'color': const Color(0xFFFFCC00), 'level': 2},
+      {'icon': Icons.fitness_center_rounded,        'name': 'Transformation Phase',  'range': '10,001 – 12,000 steps', 'color': const Color(0xFFBF5AF2), 'level': 3},
+      {'icon': Icons.emoji_events_rounded,          'name': 'Limit Zone',            'range': '12,000+ steps',         'color': const Color(0xFFFF2D55), 'level': 4},
     ];
 
     return Scaffold(
@@ -246,8 +246,6 @@ class _YouScreenState extends State<YouScreen> {
 
                     const SizedBox(height: 24),
 
-                    // ── Subscribe Banner (kept as-is) ──
-                    _subscribeBanner(),
                   ],
                 ),
               ),
@@ -258,62 +256,5 @@ class _YouScreenState extends State<YouScreen> {
     );
   }
 
-  Widget _subscribeBanner() {
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [_C.accent.withOpacity(0.12), _C.bg],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _C.accent.withOpacity(0.2)),
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(
-              color: _C.accentDim,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(Icons.lock_outline_rounded,
-                color: _C.accent, size: 18),
-          ),
-          const SizedBox(height: 14),
-          Text('Unlock your full potential.',
-              style: GoogleFonts.inter(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: _C.hi)),
-          const SizedBox(height: 6),
-          Text(
-            'Track your progress and reach your goals\nwith Premium features.',
-            style: GoogleFonts.inter(
-                fontSize: 13, color: _C.mid, height: 1.5),
-          ),
-          const SizedBox(height: 18),
-          GestureDetector(
-            onTap: () {},
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 24, vertical: 14),
-              decoration: BoxDecoration(
-                gradient: _C.accentGrad,
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: Text('Subscribe',
-                  style: GoogleFonts.inter(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+
 }

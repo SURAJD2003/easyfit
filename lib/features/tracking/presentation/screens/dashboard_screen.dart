@@ -3495,6 +3495,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     'Limit Zone',           // level 4: goal 15000 (max)
   ];
   static const _phaseGoals = [5000, 7000, 10000, 12000, 15000];
+  static const _phaseIcons = [
+    Icons.rocket_launch_rounded,    // level 0: Activation Phase
+    Icons.local_fire_department_rounded, // level 1: Fat Loss Phase
+    Icons.bolt_rounded,             // level 2: Metabolic Phase
+    Icons.fitness_center_rounded,   // level 3: Transformation Phase
+    Icons.emoji_events_rounded,     // level 4: Limit Zone
+  ];
+
+  /// Get icon for a phase level
+  static IconData _getPhaseIconForLevel(int level) {
+    return _phaseIcons[level.clamp(0, 4)];
+  }
 
   /// Get phase name from the persisted level
   static String _getPhaseNameForLevel(int level) {
@@ -3813,7 +3825,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                         border: Border.all(color: _T.accent.withOpacity(0.4 + _glow.value * 0.2), width: 1.5),
                         boxShadow: [BoxShadow(color: _T.accent.withOpacity(0.2 + _glow.value * 0.15), blurRadius: 12)],
                       ),
-                      child: const Icon(Icons.local_fire_department_rounded, color: _T.accent, size: 24),
+                      child: Icon(_getPhaseIconForLevel(_currentPhaseLevel), color: _T.accent, size: 24),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -3836,7 +3848,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                         ),
                         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
                         child: Column(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
-                          Icon(Icons.local_fire_department_rounded, color: _T.accent, size: 20),
+                          Icon(_getPhaseIconForLevel(_currentPhaseLevel), color: _T.accent, size: 20),
                           const SizedBox(height: 4),
                           Text(currentPhase.toUpperCase(), textAlign: TextAlign.center, style: GoogleFonts.inter(fontSize: 8, fontWeight: FontWeight.w800, color: _T.accent, letterSpacing: 0.4, height: 1.2)),
                           const SizedBox(height: 4),
