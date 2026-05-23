@@ -1,5 +1,6 @@
 abstract class TrackingRepository {
   Future<Map<String, dynamic>> getTodayActivity();
+  Future<Map<String, dynamic>> getDailyStats({String? date});
   Future<Map<String, dynamic>> getWeeklyStats({String? startDate, String? endDate});
   Future<Map<String, dynamic>> getMonthlyStats({String? startDate, String? endDate});
   Future<Map<String, dynamic>> getActivityHistory();

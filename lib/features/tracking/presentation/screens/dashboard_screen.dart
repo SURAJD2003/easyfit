@@ -1560,9 +1560,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     }
     
     // Auto-check habits if TOTAL daily steps >= 1000
-    // Uses apiSteps (all previous sessions) + liveSteps (current session)
-    final totalDailySteps = apiSteps + liveSteps;
-    if (totalDailySteps >= 1000 && !tablet && !water && !walk) {
+    // Uses effectiveSteps (max of all sources — prevents double-counting)
+    if (effectiveSteps >= 1000 && !tablet && !water && !walk) {
       _autoCompleteHabits();
     }
   }
@@ -1750,12 +1749,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             ref.read(pedometerProvider.notifier).startSession();
           } else {
             debugPrint('✅ Session resumed: $validSessionId');
-            // Restore pedometer counting for resumed session
-            ref.read(pedometerProvider.notifier).startSession();
+            // DON'T call startSession() for resumed sessions — it resets _baseSteps
+            // and _accumulatedSteps, causing the pedometer to freeze at 0.
+            // Instead, just ensure tracking is on without resetting counters.
+            ref.read(pedometerProvider.notifier).resumeSession();
           }
         }
       } catch (e) {
         debugPrint('⚠️ Session validation failed: $e — using local session');
+        // Even if server is unreachable, resume pedometer tracking locally
+        ref.read(pedometerProvider.notifier).resumeSession();
       }
       
       // Session valid — resume tracking UI
@@ -1787,8 +1790,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   /// Silently start a new tracking session (no button press needed)
   Future<void> _autoStartSession() async {
     try {
-      // Note: permissions are already requested by pedometer_provider on init
-      
+      // Request notification permission so the background service can show its persistent notification
+      await Permission.notification.request();
+      // Request battery optimization bypass (critical for Samsung — prevents OS from killing background service)
+      if (await Permission.ignoreBatteryOptimizations.isDenied) {
+        await Permission.ignoreBatteryOptimizations.request();
+      }
+      // Note: activity recognition permission is handled by pedometer_provider
+
       final prefs = await SharedPreferences.getInstance();
       final repo = ref.read(trackingRepositoryProvider);
       final service = FlutterBackgroundService();
@@ -1925,8 +1934,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         
         // Calculate the exact total steps the user sees on the screen right now
         final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
-        final baseSteps = apiSteps.toInt() >= _lastCompletedSteps ? apiSteps.toInt() : _lastCompletedSteps;
-        final totalDisplaySteps = baseSteps + sessionSteps;
+        final totalDisplaySteps = [apiSteps.toInt(), sessionSteps, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
         
         // Save the total as _lastCompletedSteps so the UI doesn't drop to 0 while waiting for API refresh
         _lastCompletedSteps = math.max(_lastCompletedSteps, totalDisplaySteps);
@@ -2028,8 +2036,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         
         // Calculate total display steps
         final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
-        final baseSteps = apiSteps.toInt() >= _lastCompletedSteps ? apiSteps.toInt() : _lastCompletedSteps;
-        final totalDisplaySteps = baseSteps + sessionSteps;
+        final totalDisplaySteps = [apiSteps.toInt(), sessionSteps, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
         
         // Save
         _lastCompletedSteps = math.max(_lastCompletedSteps, totalDisplaySteps);
@@ -2116,8 +2123,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     // (handles case where 1000 steps are spread across multiple sessions)
     if (_isTracking && (!_habitTablet || !_habitWater || !_habitWalk)) {
       final apiSteps = (state.todayActivity?['steps'] ?? 0) as num;
-      final totalDailySteps = apiSteps.toInt() + sessionSteps;
-      if (totalDailySteps >= 1000) {
+      // Use max (same as hero card) — prevents stale API data from triggering
+      final totalDailySteps = [apiSteps.toInt(), sessionSteps, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
+      // Extra guard: only auto-complete if we have real walking evidence today
+      // (sessionSteps > 0 means the pedometer actually counted steps this session)
+      if (totalDailySteps >= 1000 && sessionSteps > 50) {
         // Use addPostFrameCallback to avoid setState during build
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && (!_habitTablet || !_habitWater || !_habitWalk)) {
@@ -3463,12 +3473,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       return; // today not met, can't have 3 consecutive ending today
     }
     
-    // Walk backwards through weekly data
-    for (int i = daysList.length - 1; i >= 0; i--) {
-      final d = daysList[i] as Map<String, dynamic>;
+    // Sort days by date descending and walk backwards from yesterday
+    final sortedDays = List<Map<String, dynamic>>.from(
+      daysList.map((d) => d as Map<String, dynamic>)
+    )..sort((a, b) => (b['date'] ?? '').compareTo(a['date'] ?? ''));
+    
+    for (final d in sortedDays) {
       final dateStr = d['date'] ?? '';
       if (dateStr == todayStr) continue; // already counted
-      final daySteps = (d['steps'] ?? 0) as int;
+      if (dateStr.compareTo(todayStr) > 0) continue; // skip future dates
+      final daySteps = ((d['steps'] ?? 0) as num).toInt();
       if (daySteps >= goal) {
         consecutiveDays++;
       } else {
@@ -3566,14 +3580,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     var rawCalories = state.todayActivity?['calories'] ?? 0.0;
     final apiSteps = (state.todayActivity?['steps'] ?? 0) as num;
     
-    // Use apiSteps directly — _lastCompletedSteps is a fallback only for
-    // the brief gap between stopping a session and the server updating
-    final baseSteps = apiSteps.toInt() >= _lastCompletedSteps
-        ? apiSteps.toInt()
-        : _lastCompletedSteps;
-    
-    // When tracking, add live session steps on top of what server knows
-    final steps = baseSteps + sessionSteps;
+    // Use the HIGHEST value from all sources — never drops, never double-counts:
+    // - apiSteps: total steps synced to backend for today
+    // - sessionSteps: live pedometer count for current session
+    // - _lastCompletedSteps: cached fallback between session restarts
+    final steps = [apiSteps.toInt(), sessionSteps, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
     
     // Fallback: If API gave us 0 calories, dynamically generate it based on total steps
     if (rawCalories == 0.0 || rawCalories == 0) {
@@ -3735,7 +3746,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   Widget _premiumStreakCard() {
     // Get current steps for phase calculation
     final state = ref.watch(dashboardProvider);
-    final apiSteps = (state.todayActivity?['steps'] ?? 0) as int;
+    final apiSteps = ((state.todayActivity?['steps'] ?? 0) as num).toInt();
     final liveSteps = ref.watch(pedometerProvider).valueOrNull ?? 0;
     final currentSteps = [apiSteps, liveSteps, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
     
@@ -3751,6 +3762,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final daysList = (weeklyData['days'] as List<dynamic>?) ?? [];
 
     int streakDays = 0;
+    final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
     
     // Check if today's steps meet the goal
     if (currentSteps >= phaseGoal) {
@@ -3758,20 +3770,26 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     }
     
     if (daysList.isNotEmpty) {
-      for (int i = daysList.length - 1; i >= 0; i--) {
-        final d = daysList[i] as Map<String, dynamic>;
+      // Sort days by date descending so we walk backwards from most recent
+      final sortedDays = List<Map<String, dynamic>>.from(
+        daysList.map((d) => d as Map<String, dynamic>)
+      )..sort((a, b) => (b['date'] ?? '').compareTo(a['date'] ?? ''));
+      
+      // Walk backwards from yesterday (skip today, skip future dates)
+      for (final d in sortedDays) {
         final dateStr = d['date'] ?? '';
-        final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-        if (dateStr == todayStr) continue;
-        final daySteps = (d['steps'] ?? 0) as int;
+        if (dateStr == todayStr) continue; // skip today (already counted above)
+        if (dateStr.compareTo(todayStr) > 0) continue; // skip future dates
+        final daySteps = ((d['steps'] ?? 0) as num).toInt();
         if (daySteps >= phaseGoal) {
           streakDays++;
         } else {
-          break;
+          break; // streak broken
         }
       }
     }
     streakDays = streakDays.clamp(0, 7);
+    debugPrint('🔥 Streak: $streakDays days (goal: $phaseGoal, today: $currentSteps)');
 
     // Check for phase promotion (3 consecutive days)
     if (daysList.isNotEmpty) {

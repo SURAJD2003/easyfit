@@ -171,6 +171,21 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
     });
   }
 
+  /// Resume an existing session WITHOUT resetting counters.
+  /// Used when app resumes and the backend confirms the session is still active.
+  /// This prevents the pedometer from freezing at 0 after app comes to foreground.
+  void resumeSession() {
+    _isTracking = true;
+    // DON'T reset _baseSteps, _accumulatedSteps, or state
+    // Just ensure the pedometer stream is alive
+    if (_subscription == null) {
+      _startListening();
+    }
+    // Refresh from storage in case background service updated steps
+    _refreshFromStorage();
+    debugPrint('🔄 Pedometer: resumed session (steps preserved: ${state.valueOrNull ?? 0})');
+  }
+
   /// Get the current session steps only (for API stop calls)
   int get currentSessionSteps {
     return state.valueOrNull ?? 0;
@@ -293,10 +308,10 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
   void _syncWithServerThrottled(int sessionSteps) {
     if (!_isTracking) return;
     
-    // Only sync if steps actually changed by at least 20
-    if ((sessionSteps - _lastSyncedSteps).abs() > 20) {
+    // Sync if steps changed by at least 5 (lowered from 20 to catch small walks)
+    if ((sessionSteps - _lastSyncedSteps).abs() > 5) {
       if (_debounce?.isActive ?? false) _debounce?.cancel();
-      _debounce = Timer(const Duration(seconds: 3), () async {
+      _debounce = Timer(const Duration(seconds: 2), () async {
         try {
           final prefs = await SharedPreferences.getInstance();
           final sessionId = prefs.getString('active_session_id') ?? '';

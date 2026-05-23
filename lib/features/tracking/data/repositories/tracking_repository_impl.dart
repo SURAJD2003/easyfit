@@ -12,6 +12,11 @@ class TrackingRepositoryImpl implements TrackingRepository {
   }
 
   @override
+  Future<Map<String, dynamic>> getDailyStats({String? date}) {
+    return remoteDatasource.getDailyStats(date: date);
+  }
+
+  @override
   Future<Map<String, dynamic>> getWeeklyStats({String? startDate, String? endDate}) {
     return remoteDatasource.getWeeklyStats(startDate: startDate, endDate: endDate);
   }

@@ -19,6 +19,7 @@ class ApiConstants {
 
   // ── Activity & Step Tracking ──────────────────────────
   static const String activityToday = '/activity/today';
+  static const String activityDailyStats = '/activity/stats/daily'; // hourly breakdown
   static const String activityWeeklyStats = '/activity/stats/weekly';
   static const String activityMonthlyStats = '/activity/stats/monthly';
   static const String activityHistory = '/activity/history';

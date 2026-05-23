@@ -166,37 +166,51 @@ void onStart(ServiceInstance service) async {
     return false;
   }
 
-  // Listen to pedometer
+  // Listen to pedometer with auto-reconnection (Samsung kills sensor streams)
   int lastPedometerValue = -1;
   
-  pedometerSub = Pedometer.stepCountStream.listen((StepCount event) {
-    if (baseSteps == -1) {
-      baseSteps = event.steps;
-    }
-    currentSteps = event.steps - baseSteps;
-    
-    // Calculate raw delta for hourly tracking (immune to session restarts)
-    int rawDelta = 0;
-    if (lastPedometerValue != -1) {
-      rawDelta = event.steps - lastPedometerValue;
-    }
-    lastPedometerValue = event.steps;
-    
-    // Persist total for the foreground to pick up
-    final totalSteps = accumulatedBefore + currentSteps;
-    SharedPreferences.getInstance().then((p) {
-      p.setInt('session_accumulated_steps', totalSteps);
-      
-      // ── Track per-hour steps (Delta Method) ──
-      if (rawDelta > 0 && rawDelta < 1000) { // filter out massive boot jumps
-        final nowHour = DateTime.now().hour;
-        final prevHourSteps = p.getInt('hourly_steps_$nowHour') ?? 0;
-        p.setInt('hourly_steps_$nowHour', prevHourSteps + rawDelta);
+  void startPedometer() {
+    pedometerSub?.cancel();
+    pedometerSub = Pedometer.stepCountStream.listen((StepCount event) {
+      if (baseSteps == -1) {
+        baseSteps = event.steps;
       }
-    });
-    
-    updateNotification();
-  });
+      currentSteps = event.steps - baseSteps;
+      
+      // Calculate raw delta for hourly tracking (immune to session restarts)
+      int rawDelta = 0;
+      if (lastPedometerValue != -1) {
+        rawDelta = event.steps - lastPedometerValue;
+      }
+      lastPedometerValue = event.steps;
+      
+      // Persist total for the foreground to pick up
+      final totalSteps = accumulatedBefore + currentSteps;
+      SharedPreferences.getInstance().then((p) {
+        p.setInt('session_accumulated_steps', totalSteps);
+        
+        // ── Track per-hour steps (Delta Method) ──
+        if (rawDelta > 0 && rawDelta < 1000) { // filter out massive boot jumps
+          final nowHour = DateTime.now().hour;
+          final prevHourSteps = p.getInt('hourly_steps_$nowHour') ?? 0;
+          p.setInt('hourly_steps_$nowHour', prevHourSteps + rawDelta);
+        }
+      });
+      
+      updateNotification();
+    },
+    onError: (error) {
+      debugPrint('⚠️ BG Pedometer error: $error — restarting in 3s');
+      Future.delayed(const Duration(seconds: 3), () => startPedometer());
+    },
+    onDone: () {
+      debugPrint('⚠️ BG Pedometer stream closed — restarting in 3s');
+      Future.delayed(const Duration(seconds: 3), () => startPedometer());
+    },
+    cancelOnError: false,
+    );
+  }
+  startPedometer();
 
   // Initial notification
   updateNotification();
