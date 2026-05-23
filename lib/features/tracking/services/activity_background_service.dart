@@ -56,8 +56,23 @@ void onStart(ServiceInstance service) async {
   }
 
   // ── NOTIFICATION (Premium UI) ──
-  void updateNotification() {
-    final totalSteps = accumulatedBefore + currentSteps;
+  // Uses async to read SharedPreferences so the notification matches the dashboard total
+  void updateNotification() async {
+    final bgSteps = accumulatedBefore + currentSteps;
+    
+    // Read the dashboard's saved total (written by foreground via 'completed_steps_today')
+    // This ensures notification shows the SAME number as the hero card
+    final prefs = await SharedPreferences.getInstance();
+    final dashboardSteps = prefs.getInt('completed_steps_today') ?? 0;
+    
+    // Use MAX of all sources — same formula as dashboard hero card
+    final totalSteps = [bgSteps, dashboardSteps].reduce((a, b) => a > b ? a : b);
+    
+    // Also persist back so dashboard can pick up BG steps
+    if (bgSteps > dashboardSteps) {
+      await prefs.setInt('completed_steps_today', bgSteps);
+    }
+    
     final elapsed = DateTime.now().difference(sessionStart);
     final duration = _formatDuration(elapsed);
     final calories = (totalSteps * 0.045).round();
@@ -238,7 +253,9 @@ void onStart(ServiceInstance service) async {
         return;
       }
       
-      final totalSteps = accumulatedBefore + currentSteps;
+      final bgSteps = accumulatedBefore + currentSteps;
+      final dashboardSteps = prefs.getInt('completed_steps_today') ?? 0;
+      final totalSteps = [bgSteps, dashboardSteps].reduce((a, b) => a > b ? a : b);
       
       // ✅ SKIP sync if steps haven't changed since last sync
       if (totalSteps == lastSyncedTotal) {
