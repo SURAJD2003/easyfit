@@ -1743,10 +1743,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           await prefs.setString('active_session_id', validSessionId.toString());
           
           if (!resumed) {
-            // Backend gave us a NEW session (old one was stale) — reset local counters
+            // Backend gave us a NEW session (old one was stale) — 
+            // Start a fresh session at 0. The hero card will show
+            // (_lastCompletedSteps + 0) = correct daily total
             debugPrint('🔄 Stale session detected, got fresh session: $validSessionId');
             await prefs.setInt('session_accumulated_steps', 0);
             ref.read(pedometerProvider.notifier).startSession();
+            
+            // CRITICAL: Restart the BG service so it picks up the new session ID!
+            // Without this, the BG service keeps syncing to the old dead session → 404 errors
+            final service = FlutterBackgroundService();
+            service.invoke('stopService');
+            await Future.delayed(const Duration(milliseconds: 500));
+            service.startService();
+            debugPrint('🔄 Restarted BG service for new session: $validSessionId');
           } else {
             debugPrint('✅ Session resumed: $validSessionId');
             // DON'T call startSession() for resumed sessions — it resets _baseSteps
@@ -1900,12 +1910,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         final livePedometerSteps = ref.read(pedometerProvider).value ?? 0;
         final sessionSteps = ref.read(pedometerProvider.notifier).currentSessionSteps;
         final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
-        // The true session steps is the max of the foreground and the background
+        // Calculate live daily total for the UI
+        final liveDailyTotal = _lastCompletedSteps + sessionSteps;
+        
+        // finalSteps is what we send to the backend for THIS SESSION ONLY.
+        // It must NOT include _lastCompletedSteps, otherwise the backend will sum the daily total repeatedly!
         final finalSteps = math.max(sessionSteps, bgAccumulatedSteps);
         final finalCalories = (finalSteps * 0.045).round();
         final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
         
-        debugPrint('📊 Silent sync: sessionSteps=$sessionSteps, liveDisplay=$livePedometerSteps, final=$finalSteps');
+        debugPrint('📊 Silent sync: sessionSteps=$sessionSteps, liveDisplay=$livePedometerSteps, cached=$_lastCompletedSteps, final=$finalSteps');
         
         // SYNC first — ensures backend has latest steps even if stopSession fails
         try {
@@ -1932,12 +1946,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           debugPrint('⚠️ Stop session API failed: $e');
         }
         
-        // Calculate the exact total steps the user sees on the screen right now
+        // Update _lastCompletedSteps: add THIS session's steps to the running daily total
+        _lastCompletedSteps = _lastCompletedSteps + finalSteps;
+        // Also consider API — it might be higher if another device synced
         final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
-        final totalDisplaySteps = [apiSteps.toInt(), sessionSteps, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
-        
-        // Save the total as _lastCompletedSteps so the UI doesn't drop to 0 while waiting for API refresh
-        _lastCompletedSteps = math.max(_lastCompletedSteps, totalDisplaySteps);
+        if (apiSteps.toInt() > _lastCompletedSteps) {
+          _lastCompletedSteps = apiSteps.toInt();
+        }
         final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
         await prefs.setInt('completed_steps_today', _lastCompletedSteps);
         await prefs.setString('completed_steps_date', today);
@@ -1946,7 +1961,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         await prefs.remove('active_session_id');
         await prefs.remove('session_accumulated_steps');
         
-        // START a new session immediately
+        // IMPORTANT: startSession() resets pedometer to 0 for the new backend session.
+        // The hero card will use (_lastCompletedSteps + sessionSteps) so the UI doesn't drop to 0.
         ref.read(pedometerProvider.notifier).startSession();
         
         Map<String, dynamic> sessionResponse;
@@ -2005,6 +2021,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         final livePedometerSteps = ref.read(pedometerProvider).value ?? 0;
         final sessionSteps = ref.read(pedometerProvider.notifier).currentSessionSteps;
         final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
+        // finalSteps is what we send to the backend for THIS SESSION ONLY.
+        // It must NOT include _lastCompletedSteps!
         final finalSteps = math.max(sessionSteps, bgAccumulatedSteps);
         final finalCalories = (finalSteps * 0.045).round();
         final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
@@ -2034,12 +2052,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           debugPrint('⚠️ Silent tab sync stop failed: $e');
         }
         
-        // Calculate total display steps
+        // Update _lastCompletedSteps: add THIS session's steps to the running daily total
+        _lastCompletedSteps = _lastCompletedSteps + finalSteps;
         final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
-        final totalDisplaySteps = [apiSteps.toInt(), sessionSteps, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
-        
-        // Save
-        _lastCompletedSteps = math.max(_lastCompletedSteps, totalDisplaySteps);
+        if (apiSteps.toInt() > _lastCompletedSteps) {
+          _lastCompletedSteps = apiSteps.toInt();
+        }
         final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
         await prefs.setInt('completed_steps_today', _lastCompletedSteps);
         await prefs.setString('completed_steps_date', today);
@@ -2048,7 +2066,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         await prefs.remove('active_session_id');
         await prefs.remove('session_accumulated_steps');
         
-        // START new session
+        // IMPORTANT: startSession() resets pedometer to 0 for the new backend session.
         ref.read(pedometerProvider.notifier).startSession();
         
         Map<String, dynamic> sessionResponse;
@@ -2123,8 +2141,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     // (handles case where 1000 steps are spread across multiple sessions)
     if (_isTracking && (!_habitTablet || !_habitWater || !_habitWalk)) {
       final apiSteps = (state.todayActivity?['steps'] ?? 0) as num;
-      // Use max (same as hero card) — prevents stale API data from triggering
-      final totalDailySteps = [apiSteps.toInt(), sessionSteps, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
+      // Use addition formula (same as hero card)
+      final totalDailySteps = _lastCompletedSteps + sessionSteps;
       // Extra guard: only auto-complete if we have real walking evidence today
       // (sessionSteps > 0 means the pedometer actually counted steps this session)
       if (totalDailySteps >= 1000 && sessionSteps > 50) {
@@ -3580,11 +3598,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     var rawCalories = state.todayActivity?['calories'] ?? 0.0;
     final apiSteps = (state.todayActivity?['steps'] ?? 0) as num;
     
-    // Use the HIGHEST value from all sources — never drops, never double-counts:
     // - apiSteps: total steps synced to backend for today
-    // - sessionSteps: live pedometer count for current session
-    // - _lastCompletedSteps: cached fallback between session restarts
-    final steps = [apiSteps.toInt(), sessionSteps, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
+    // - _lastCompletedSteps + sessionSteps: LIVE daily total
+    final liveDailyTotal = _lastCompletedSteps + sessionSteps;
+    final steps = math.max(apiSteps.toInt(), liveDailyTotal);
     
     // Fallback: If API gave us 0 calories, dynamically generate it based on total steps
     if (rawCalories == 0.0 || rawCalories == 0) {
@@ -3748,7 +3765,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final state = ref.watch(dashboardProvider);
     final apiSteps = ((state.todayActivity?['steps'] ?? 0) as num).toInt();
     final liveSteps = ref.watch(pedometerProvider).valueOrNull ?? 0;
-    final currentSteps = [apiSteps, liveSteps, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
+    final liveDailyTotal = _lastCompletedSteps + liveSteps;
+    final currentSteps = math.max(apiSteps, liveDailyTotal);
     
     // Use persisted phase level (advances only after 3 consecutive days)
     final currentPhase = _getPhaseNameForLevel(_currentPhaseLevel);
@@ -4378,10 +4396,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             // Stop auto-refreshing stats
             ref.read(dashboardProvider.notifier).stopAutoRefresh();
             
-            // Capture final step counts BEFORE resetting pedometer
             final livePedometerSteps = ref.read(pedometerProvider).value ?? 0;
+            final sessionSteps = ref.read(pedometerProvider.notifier).currentSessionSteps;
             final prevApiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
-            final totalSteps = prevApiSteps.toInt() + livePedometerSteps;
+            // Daily total = previous sessions + current session
+            final totalSteps = math.max(prevApiSteps.toInt(), _lastCompletedSteps + sessionSteps);
             
             // Save for hero card display (so it doesn't drop to 0)
             // NEVER decrease — steps only go up within a day
@@ -4399,10 +4418,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             final sessionIdToStop = prefs.getString('active_session_id') ?? '';
             
             if (sessionIdToStop.isNotEmpty) {
-              // Use session-specific steps only (NOT totalSteps which includes previous sessions)
+              // Send ONLY this session's steps to the backend
               final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
-              // BG service tracks session steps most accurately; pedometer is fallback
-              final finalSteps = math.max(bgAccumulatedSteps, livePedometerSteps);
+              final finalSteps = math.max(bgAccumulatedSteps, sessionSteps);
               final finalCalories = (finalSteps * 0.045).round();
               final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
               

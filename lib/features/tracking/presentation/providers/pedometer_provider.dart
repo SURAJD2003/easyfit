@@ -186,6 +186,29 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
     debugPrint('🔄 Pedometer: resumed session (steps preserved: ${state.valueOrNull ?? 0})');
   }
 
+  /// Resume tracking from a known accumulated total.
+  /// Used after silent sync (stop → start) to carry forward the day's step total
+  /// so new steps ADD on top instead of restarting from 0.
+  void resumeWithAccumulated(int accumulatedTotal) {
+    _isTracking = true;
+    _accumulatedSteps = accumulatedTotal;
+    _baseSteps = -1; // will re-calibrate on next pedometer event
+    _lastSyncedSteps = 0; // allow immediate sync of new steps
+    _lastMilestone = (accumulatedTotal ~/ 1000) * 1000;
+    _sessionDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    state = AsyncValue.data(accumulatedTotal);
+    // Persist so BG service + crash recovery have the right starting point
+    _persistSteps(accumulatedTotal);
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString('session_date', _sessionDate);
+    });
+    // Ensure pedometer stream is alive
+    if (_subscription == null) {
+      _startListening();
+    }
+    debugPrint('🔄 Pedometer: resumed with accumulated $accumulatedTotal steps');
+  }
+
   /// Get the current session steps only (for API stop calls)
   int get currentSessionSteps {
     return state.valueOrNull ?? 0;
@@ -246,6 +269,15 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
         
         // Persist every step for crash recovery
         _persistSteps(totalSessionSteps);
+        
+        // Also write to completed_steps_today so BG notification + stats screen
+        // always have the latest foreground total
+        SharedPreferences.getInstance().then((prefs) {
+          final existing = prefs.getInt('completed_steps_today') ?? 0;
+          if (totalSessionSteps > existing) {
+            prefs.setInt('completed_steps_today', totalSessionSteps);
+          }
+        });
 
         // ── Track per-hour steps ──
         _updateHourlySteps(totalSessionSteps);

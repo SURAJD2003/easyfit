@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/router/route_names.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/pedometer_provider.dart';
 
 
 class _T {
@@ -49,9 +51,15 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
   int _listTab       = 0;
   int _activeCard    = 0; // 0=Steps, 1=Distance, 2=Calories
   int _currentPhaseLevel = 0; // persisted phase level (same as dashboard)
+  int _cachedCompletedSteps = 0; // Local cache for step alignment
 
   // Phase goals matching dashboard
   static const _phaseGoals = [5000, 7000, 10000, 12000, 15000];
+
+  void _loadCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) setState(() => _cachedCompletedSteps = prefs.getInt('completed_steps_today') ?? 0);
+  }
 
   // ══════════════════════════════════════════════════════════
   //  API-ALIGNED DATA — maps to real server response schemas
@@ -61,9 +69,27 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
   // { "steps": 0, "calories": 0, "distance": 0,
   //   "activeMinutes": 0, "goalSteps": 0, "goalProgress": 0 }
   Map<String, dynamic>? get _todayData => ref.watch(dashboardProvider).todayActivity;
-  int    get _todaySteps     => (_todayData?['steps'] ?? 0) as int;
-  double get _todayCalories  => ((_todayData?['calories'] ?? 0) as num).toDouble();
-  double get _todayDistance  => ((_todayData?['distance'] ?? 0) as num).toDouble();
+  
+  // Use the SAME max-of-all-sources formula as the dashboard hero card
+  // so stats screen always shows the same number.
+  int get _todaySteps {
+    final apiSteps = (_todayData?['steps'] ?? 0) as int;
+    final pedometerSteps = ref.watch(pedometerProvider).valueOrNull ?? 0;
+    final liveDailyTotal = _cachedCompletedSteps + pedometerSteps;
+    return math.max(apiSteps, liveDailyTotal);
+  }
+  // For calories and distance: if our MAX steps is higher than API steps,
+  // derive calories/distance from steps (same formula as dashboard hero card)
+  double get _todayCalories {
+    final apiCals = ((_todayData?['calories'] ?? 0) as num).toDouble();
+    final derivedCals = _todaySteps * 0.045;
+    return [apiCals, derivedCals].reduce((a, b) => a > b ? a : b);
+  }
+  double get _todayDistance {
+    final apiDist = ((_todayData?['distance'] ?? 0) as num).toDouble();
+    final derivedDist = _todaySteps * 0.000762;
+    return [apiDist, derivedDist].reduce((a, b) => a > b ? a : b);
+  }
   int    get _todayActive    => (_todayData?['activeMinutes'] ?? 0) as int;
   int    get _todayGoal      => _phaseGoals[_currentPhaseLevel.clamp(0, 4)];
   double get _todayProgress  => ((_todayData?['goalProgress'] ?? 0) as num).toDouble();
@@ -372,6 +398,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
     super.initState();
     _selectedPeriod = 0; // Start on THIS WEEK / TODAY / current month
     _loadPhaseLevel(); // load persisted phase level
+    _loadCache(); // load completed steps for MAX formula
     // Trigger a fresh API fetch when stats screen opens
     Future.microtask(() => ref.read(dashboardProvider.notifier).refresh());
   }

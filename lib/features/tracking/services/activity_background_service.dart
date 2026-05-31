@@ -34,8 +34,10 @@ void onStart(ServiceInstance service) async {
 
   // Recover accumulated steps from the foreground
   final prefsInit = await SharedPreferences.getInstance();
-  accumulatedBefore = prefsInit.getInt('session_accumulated_steps') ?? 0;
+  final sessionAccumulated = prefsInit.getInt('session_accumulated_steps') ?? 0;
+  accumulatedBefore = sessionAccumulated;
   sessionDate = prefsInit.getString('session_date') ?? DateFormat('yyyy-MM-dd').format(DateTime.now());
+  debugPrint('🔄 BG: Started with accumulatedBefore=$accumulatedBefore');
 
   // Check if there's actually an active session
   final sessionId = prefsInit.getString('active_session_id');
@@ -58,28 +60,23 @@ void onStart(ServiceInstance service) async {
   // ── NOTIFICATION (Premium UI) ──
   // Uses async to read SharedPreferences so the notification matches the dashboard total
   void updateNotification() async {
+    // bgSteps is the CURRENT SESSION'S total
     final bgSteps = accumulatedBefore + currentSteps;
     
-    // Read the dashboard's saved total (written by foreground via 'completed_steps_today')
-    // This ensures notification shows the SAME number as the hero card
+    // dashboardSteps is the day's total before the current session started
     final prefs = await SharedPreferences.getInstance();
     final dashboardSteps = prefs.getInt('completed_steps_today') ?? 0;
     
-    // Use MAX of all sources — same formula as dashboard hero card
-    final totalSteps = [bgSteps, dashboardSteps].reduce((a, b) => a > b ? a : b);
-    
-    // Also persist back so dashboard can pick up BG steps
-    if (bgSteps > dashboardSteps) {
-      await prefs.setInt('completed_steps_today', bgSteps);
-    }
+    // Display the daily total to the user in the notification
+    final totalDailySteps = dashboardSteps + bgSteps;
     
     final elapsed = DateTime.now().difference(sessionStart);
     final duration = _formatDuration(elapsed);
-    final calories = (totalSteps * 0.045).round();
-    final distance = (totalSteps * 0.000762).toStringAsFixed(2);
+    final calories = (totalDailySteps * 0.045).round();
+    final distance = (totalDailySteps * 0.000762).toStringAsFixed(2);
     
     // Build a clean, informative notification
-    final title = '🏃 $totalSteps steps  ·  $duration';
+    final title = '🏃 $totalDailySteps steps  ·  $duration';
     final body = '🔥 $calories kcal  ·  📍 ${distance} km  ·  Tracking active';
     
     notifPlugin.show(
@@ -253,18 +250,18 @@ void onStart(ServiceInstance service) async {
         return;
       }
       
+      // We sync bgSteps (which is ONLY the current session's steps) to the backend.
+      // The backend expects session steps and will sum them to get the daily total.
       final bgSteps = accumulatedBefore + currentSteps;
-      final dashboardSteps = prefs.getInt('completed_steps_today') ?? 0;
-      final totalSteps = [bgSteps, dashboardSteps].reduce((a, b) => a > b ? a : b);
       
       // ✅ SKIP sync if steps haven't changed since last sync
-      if (totalSteps == lastSyncedTotal) {
-        debugPrint('⏭️ BG: Skipping sync — no new steps ($totalSteps)');
+      if (bgSteps == lastSyncedTotal) {
+        debugPrint('⏭️ BG: Skipping sync — no new steps ($bgSteps)');
         return;
       }
       
-      final calories = (totalSteps * 0.045).round();
-      final distance = double.parse((totalSteps * 0.000762).toStringAsFixed(3));
+      final calories = (bgSteps * 0.045).round();
+      final distance = double.parse((bgSteps * 0.000762).toStringAsFixed(3));
       
       final dio = Dio(BaseOptions(
         baseUrl: 'https://api.theeasyfitclinics.com/api',
@@ -277,14 +274,14 @@ void onStart(ServiceInstance service) async {
       
       await dio.post('/activity/sync', data: {
         'sessionId': currentSessionId,
-        'steps': totalSteps,
+        'steps': bgSteps,
         'calories': calories,
         'distance': distance,
         'timestamp': DateTime.now().toIso8601String(),
       });
       
-      lastSyncedTotal = totalSteps;
-      debugPrint('✅ BG Sync: $totalSteps steps (synced)');
+      lastSyncedTotal = bgSteps;
+      debugPrint('✅ BG Sync: $bgSteps steps (synced)');
     } catch (e) {
       debugPrint('❌ BG Sync Error: $e');
     }
