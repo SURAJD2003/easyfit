@@ -12,6 +12,11 @@ class TrackingRepositoryImpl implements TrackingRepository {
   }
 
   @override
+  Future<Map<String, dynamic>> getDailyStats({String? date}) {
+    return remoteDatasource.getDailyStats(date: date);
+  }
+
+  @override
   Future<Map<String, dynamic>> getWeeklyStats({String? startDate, String? endDate}) {
     return remoteDatasource.getWeeklyStats(startDate: startDate, endDate: endDate);
   }
@@ -54,5 +59,10 @@ class TrackingRepositoryImpl implements TrackingRepository {
   @override
   Future<void> syncSteps({required String sessionId, required int steps, required int calories, required double distance}) {
     return remoteDatasource.syncSteps(sessionId: sessionId, steps: steps, calories: calories, distance: distance);
+  }
+
+  @override
+  Future<Map<String, dynamic>> getActivityProgress() {
+    return remoteDatasource.getActivityProgress();
   }
 }

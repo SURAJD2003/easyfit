@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../../../../core/api_client.dart';
 import '../../../../core/api_constants.dart';
 
@@ -39,6 +40,26 @@ class ActivityRemoteDatasource {
       queryParameters: {'date': localDate},
     );
     return _parseResponse(response.data);
+  }
+
+  // GET /activity/stats/daily?date=YYYY-MM-DD → hourly breakdown
+  // Response: { date, hours: [{hour, label, steps, calories, distance, hasActivity}],
+  //             totalSteps, totalCalories, totalDistance, peakHour }
+  Future<Map<String, dynamic>> getDailyStats({String? date}) async {
+    final localDate = date ?? DateTime.now().toIso8601String().split('T')[0];
+    debugPrint('📊 Fetching daily stats for: $localDate');
+    try {
+      final response = await _dio.get(
+        ApiConstants.activityDailyStats,
+        queryParameters: {'date': localDate},
+      );
+      final parsed = _parseResponse(response.data);
+      debugPrint('📊 Daily stats response: $parsed');
+      return parsed;
+    } catch (e) {
+      debugPrint('❌ Daily stats API failed: $e');
+      rethrow;
+    }
   }
 
   // GET /activity/stats/weekly?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
@@ -131,6 +152,12 @@ class ActivityRemoteDatasource {
   // GET /activity/session/{id}
   Future<Map<String, dynamic>> getSessionById(String id) async {
     final response = await _dio.get(ApiConstants.activitySessionById(id));
+    return _parseResponse(response.data);
+  }
+
+  // GET /activity/progress → streak, phase, last7Days
+  Future<Map<String, dynamic>> getActivityProgress() async {
+    final response = await _dio.get(ApiConstants.activityProgress);
     return _parseResponse(response.data);
   }
 

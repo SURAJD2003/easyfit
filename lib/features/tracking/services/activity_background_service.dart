@@ -34,8 +34,10 @@ void onStart(ServiceInstance service) async {
 
   // Recover accumulated steps from the foreground
   final prefsInit = await SharedPreferences.getInstance();
-  accumulatedBefore = prefsInit.getInt('session_accumulated_steps') ?? 0;
+  final sessionAccumulated = prefsInit.getInt('session_accumulated_steps') ?? 0;
+  accumulatedBefore = sessionAccumulated;
   sessionDate = prefsInit.getString('session_date') ?? DateFormat('yyyy-MM-dd').format(DateTime.now());
+  debugPrint('🔄 BG: Started with accumulatedBefore=$accumulatedBefore');
 
   // Check if there's actually an active session
   final sessionId = prefsInit.getString('active_session_id');
@@ -56,15 +58,25 @@ void onStart(ServiceInstance service) async {
   }
 
   // ── NOTIFICATION (Premium UI) ──
-  void updateNotification() {
-    final totalSteps = accumulatedBefore + currentSteps;
+  // Uses async to read SharedPreferences so the notification matches the dashboard total
+  void updateNotification() async {
+    // bgSteps is the CURRENT SESSION'S total
+    final bgSteps = accumulatedBefore + currentSteps;
+    
+    // dashboardSteps is the day's total before the current session started
+    final prefs = await SharedPreferences.getInstance();
+    final dashboardSteps = prefs.getInt('completed_steps_today') ?? 0;
+    
+    // Display the daily total to the user in the notification
+    final totalDailySteps = dashboardSteps + bgSteps;
+    
     final elapsed = DateTime.now().difference(sessionStart);
     final duration = _formatDuration(elapsed);
-    final calories = (totalSteps * 0.045).round();
-    final distance = (totalSteps * 0.000762).toStringAsFixed(2);
+    final calories = (totalDailySteps * 0.045).round();
+    final distance = (totalDailySteps * 0.000762).toStringAsFixed(2);
     
     // Build a clean, informative notification
-    final title = '🏃 $totalSteps steps  ·  $duration';
+    final title = '🏃 $totalDailySteps steps  ·  $duration';
     final body = '🔥 $calories kcal  ·  📍 ${distance} km  ·  Tracking active';
     
     notifPlugin.show(
@@ -166,37 +178,51 @@ void onStart(ServiceInstance service) async {
     return false;
   }
 
-  // Listen to pedometer
+  // Listen to pedometer with auto-reconnection (Samsung kills sensor streams)
   int lastPedometerValue = -1;
   
-  pedometerSub = Pedometer.stepCountStream.listen((StepCount event) {
-    if (baseSteps == -1) {
-      baseSteps = event.steps;
-    }
-    currentSteps = event.steps - baseSteps;
-    
-    // Calculate raw delta for hourly tracking (immune to session restarts)
-    int rawDelta = 0;
-    if (lastPedometerValue != -1) {
-      rawDelta = event.steps - lastPedometerValue;
-    }
-    lastPedometerValue = event.steps;
-    
-    // Persist total for the foreground to pick up
-    final totalSteps = accumulatedBefore + currentSteps;
-    SharedPreferences.getInstance().then((p) {
-      p.setInt('session_accumulated_steps', totalSteps);
-      
-      // ── Track per-hour steps (Delta Method) ──
-      if (rawDelta > 0 && rawDelta < 1000) { // filter out massive boot jumps
-        final nowHour = DateTime.now().hour;
-        final prevHourSteps = p.getInt('hourly_steps_$nowHour') ?? 0;
-        p.setInt('hourly_steps_$nowHour', prevHourSteps + rawDelta);
+  void startPedometer() {
+    pedometerSub?.cancel();
+    pedometerSub = Pedometer.stepCountStream.listen((StepCount event) {
+      if (baseSteps == -1) {
+        baseSteps = event.steps;
       }
-    });
-    
-    updateNotification();
-  });
+      currentSteps = event.steps - baseSteps;
+      
+      // Calculate raw delta for hourly tracking (immune to session restarts)
+      int rawDelta = 0;
+      if (lastPedometerValue != -1) {
+        rawDelta = event.steps - lastPedometerValue;
+      }
+      lastPedometerValue = event.steps;
+      
+      // Persist total for the foreground to pick up
+      final totalSteps = accumulatedBefore + currentSteps;
+      SharedPreferences.getInstance().then((p) {
+        p.setInt('session_accumulated_steps', totalSteps);
+        
+        // ── Track per-hour steps (Delta Method) ──
+        if (rawDelta > 0 && rawDelta < 1000) { // filter out massive boot jumps
+          final nowHour = DateTime.now().hour;
+          final prevHourSteps = p.getInt('hourly_steps_$nowHour') ?? 0;
+          p.setInt('hourly_steps_$nowHour', prevHourSteps + rawDelta);
+        }
+      });
+      
+      updateNotification();
+    },
+    onError: (error) {
+      debugPrint('⚠️ BG Pedometer error: $error — restarting in 3s');
+      Future.delayed(const Duration(seconds: 3), () => startPedometer());
+    },
+    onDone: () {
+      debugPrint('⚠️ BG Pedometer stream closed — restarting in 3s');
+      Future.delayed(const Duration(seconds: 3), () => startPedometer());
+    },
+    cancelOnError: false,
+    );
+  }
+  startPedometer();
 
   // Initial notification
   updateNotification();
@@ -224,16 +250,62 @@ void onStart(ServiceInstance service) async {
         return;
       }
       
-      final totalSteps = accumulatedBefore + currentSteps;
+      // If session is a local offline one, try to swap it for a real backend session.
+      // If that fails (still offline), skip the sync but keep counting locally.
+      if (currentSessionId.startsWith('local_')) {
+        debugPrint('📴 BG: Local session detected, attempting to get real session...');
+        try {
+          final dio = Dio(BaseOptions(
+            baseUrl: 'https://api.theeasyfitclinics.com/api',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          ));
+          
+          final startResp = await dio.post('/activity/session/start', data: {
+            'startTime': DateTime.now().toIso8601String(),
+            'baselineSteps': 0,
+          });
+          
+          dynamic respData = startResp.data;
+          if (respData is String) {
+            try { respData = await Future.value(respData).then((_) => startResp.data is String ? {} : startResp.data); } catch (_) {}
+          }
+          final realSessionId = (respData is Map) ? (respData['sessionId'] ?? respData['id'] ?? '') : '';
+          if (realSessionId.toString().isNotEmpty) {
+            await prefs.setString('active_session_id', realSessionId.toString());
+            debugPrint('✅ BG: Swapped local → real session: $realSessionId');
+            // Don't return — continue to sync with the new real session ID below
+          } else {
+            debugPrint('⚠️ BG: No session ID returned, skipping sync');
+            return;
+          }
+        } catch (e) {
+          debugPrint('📴 BG: Still offline, skipping sync — steps counting locally');
+          return; // Stay alive, retry next cycle
+        }
+      }
+      
+      // Re-read session ID in case we just swapped it
+      final activeSessionId = prefs.getString('active_session_id') ?? '';
+      if (activeSessionId.isEmpty || activeSessionId.startsWith('local_')) {
+        return; // Safety check
+      }
+      
+      // We sync bgSteps (which is ONLY the current session's steps) to the backend.
+      // The backend expects session steps and will sum them to get the daily total.
+      final bgSteps = accumulatedBefore + currentSteps;
       
       // ✅ SKIP sync if steps haven't changed since last sync
-      if (totalSteps == lastSyncedTotal) {
-        debugPrint('⏭️ BG: Skipping sync — no new steps ($totalSteps)');
+      if (bgSteps == lastSyncedTotal) {
+        debugPrint('⏭️ BG: Skipping sync — no new steps ($bgSteps)');
         return;
       }
       
-      final calories = (totalSteps * 0.045).round();
-      final distance = double.parse((totalSteps * 0.000762).toStringAsFixed(3));
+      final calories = (bgSteps * 0.045).round();
+      final distance = double.parse((bgSteps * 0.000762).toStringAsFixed(3));
       
       final dio = Dio(BaseOptions(
         baseUrl: 'https://api.theeasyfitclinics.com/api',
@@ -245,15 +317,15 @@ void onStart(ServiceInstance service) async {
       ));
       
       await dio.post('/activity/sync', data: {
-        'sessionId': currentSessionId,
-        'steps': totalSteps,
+        'sessionId': activeSessionId,
+        'steps': bgSteps,
         'calories': calories,
         'distance': distance,
         'timestamp': DateTime.now().toIso8601String(),
       });
       
-      lastSyncedTotal = totalSteps;
-      debugPrint('✅ BG Sync: $totalSteps steps (synced)');
+      lastSyncedTotal = bgSteps;
+      debugPrint('✅ BG Sync: $bgSteps steps (synced)');
     } catch (e) {
       debugPrint('❌ BG Sync Error: $e');
     }

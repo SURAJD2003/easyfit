@@ -1,5 +1,7 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart' hide TextDirection;
@@ -7,6 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/router/route_names.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/pedometer_provider.dart';
+
 
 class _T {
   static const bg        = Color(0xFF0A0A0A);
@@ -47,9 +51,15 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
   int _listTab       = 0;
   int _activeCard    = 0; // 0=Steps, 1=Distance, 2=Calories
   int _currentPhaseLevel = 0; // persisted phase level (same as dashboard)
+  int _cachedCompletedSteps = 0; // Local cache for step alignment
 
   // Phase goals matching dashboard
   static const _phaseGoals = [5000, 7000, 10000, 12000, 15000];
+
+  void _loadCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) setState(() => _cachedCompletedSteps = prefs.getInt('completed_steps_today') ?? 0);
+  }
 
   // ══════════════════════════════════════════════════════════
   //  API-ALIGNED DATA — maps to real server response schemas
@@ -59,70 +69,79 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
   // { "steps": 0, "calories": 0, "distance": 0,
   //   "activeMinutes": 0, "goalSteps": 0, "goalProgress": 0 }
   Map<String, dynamic>? get _todayData => ref.watch(dashboardProvider).todayActivity;
-  int    get _todaySteps     => (_todayData?['steps'] ?? 0) as int;
-  double get _todayCalories  => ((_todayData?['calories'] ?? 0) as num).toDouble();
-  double get _todayDistance  => ((_todayData?['distance'] ?? 0) as num).toDouble();
+  
+  // Use the SAME max-of-all-sources formula as the dashboard hero card
+  // so stats screen always shows the same number.
+  int get _todaySteps {
+    final apiSteps = (_todayData?['steps'] ?? 0) as int;
+    final pedometerSteps = ref.watch(pedometerProvider).valueOrNull ?? 0;
+    final liveDailyTotal = _cachedCompletedSteps + pedometerSteps;
+    return math.max(apiSteps, liveDailyTotal);
+  }
+  // For calories and distance: if our MAX steps is higher than API steps,
+  // derive calories/distance from steps (same formula as dashboard hero card)
+  double get _todayCalories {
+    final apiCals = ((_todayData?['calories'] ?? 0) as num).toDouble();
+    final derivedCals = _todaySteps * 0.045;
+    return [apiCals, derivedCals].reduce((a, b) => a > b ? a : b);
+  }
+  double get _todayDistance {
+    final apiDist = ((_todayData?['distance'] ?? 0) as num).toDouble();
+    final derivedDist = _todaySteps * 0.000762;
+    return [apiDist, derivedDist].reduce((a, b) => a > b ? a : b);
+  }
   int    get _todayActive    => (_todayData?['activeMinutes'] ?? 0) as int;
   int    get _todayGoal      => _phaseGoals[_currentPhaseLevel.clamp(0, 4)];
   double get _todayProgress  => ((_todayData?['goalProgress'] ?? 0) as num).toDouble();
 
-  // ── Hourly step data (loaded async from SharedPreferences) ──
+  // ── Hourly step data (loaded from API) ──
   List<double> _hourlySteps = List.filled(24, 0.0);
   bool _hourlyLoaded = false;
+  Map<String, dynamic>? _dailyStatsData; // raw API response for debug
 
   void _loadHourlySteps() async {
     if (_hourlyLoaded) return;
     _hourlyLoaded = true;
-    final prefs = await SharedPreferences.getInstance();
-    final total = _todaySteps;
 
-    // Try to read hourly_steps_X keys (set by background service / pedometer)
-    final now = DateTime.now();
-    List<double> hourly = List.filled(24, 0.0);
-    bool hasData = false;
-    int trackedSum = 0;
-    for (int h = 0; h < 24; h++) {
-      final val = prefs.getInt('hourly_steps_$h') ?? 0;
-      hourly[h] = val.toDouble();
-      trackedSum += val;
-      if (val > 0) hasData = true;
-    }
+    final repo = ref.read(trackingRepositoryProvider);
+    final today = DateTime.now().toIso8601String().split('T')[0];
 
-    if (hasData) {
-      // If tracked sum is less than total, add remainder to current hour
-      final remainder = total - trackedSum;
-      if (remainder > 0) {
-        hourly[now.hour] += remainder.toDouble();
+    debugPrint('📊 [StatsScreen] Loading hourly steps from API for $today');
+
+    try {
+      final data = await repo.getDailyStats(date: today);
+      _dailyStatsData = data;
+
+      debugPrint('📊 [StatsScreen] Daily stats API response: $data');
+
+      final hours = data['hours'] as List?;
+      if (hours == null || hours.isEmpty) {
+        debugPrint('⚠️ [StatsScreen] No hours data in response');
+        if (mounted) setState(() => _hourlySteps = List.filled(24, 0.0));
+        return;
       }
-    } else if (total > 0) {
-      // No hourly data but API has steps — distribute naturally across active hours
-      final currentHour = now.hour;
-      final activeMins = _todayActive;
-      // Determine how many hours we were active
-      int activeHrs = activeMins > 0 ? (activeMins / 60).ceil().clamp(1, currentHour + 1) : 1;
-      if (activeHrs <= 0) activeHrs = 1;
-      
-      // Create a weighted distribution: more steps in middle hours, less at edges
-      // This looks more natural than the same number repeated
-      List<double> weights = [];
-      for (int i = 0; i < activeHrs; i++) {
-        // Bell-curve-ish: peak in the middle of active period
-        final normalized = activeHrs == 1 ? 1.0 : (i / (activeHrs - 1));
-        // Weight: rises then falls
-        final w = 0.4 + 0.6 * (1.0 - (2.0 * normalized - 1.0).abs());
-        weights.add(w);
-      }
-      final totalWeight = weights.fold(0.0, (a, b) => a + b);
-      
-      for (int i = 0; i < activeHrs; i++) {
-        final h = currentHour - (activeHrs - 1 - i);
-        if (h >= 0 && h < 24) {
-          hourly[h] = (total * weights[i] / totalWeight).roundToDouble();
+
+      final List<double> hourly = List.filled(24, 0.0);
+      for (final h in hours) {
+        final hourIndex = (h['hour'] as num?)?.toInt() ?? -1;
+        final steps = (h['steps'] as num?)?.toDouble() ?? 0.0;
+        debugPrint('📊 [StatsScreen] Hour $hourIndex (${h['label']}): $steps steps, hasActivity=${h['hasActivity']}');
+        if (hourIndex >= 0 && hourIndex < 24) {
+          hourly[hourIndex] = steps;
         }
       }
-    }
 
-    if (mounted) setState(() => _hourlySteps = hourly);
+      final peakHour = data['peakHour'];
+      if (peakHour != null) {
+        debugPrint('📊 [StatsScreen] Peak hour: ${peakHour['label']} with ${peakHour['steps']} steps');
+      }
+      debugPrint('📊 [StatsScreen] Total steps from daily API: ${data['totalSteps']}');
+
+      if (mounted) setState(() => _hourlySteps = hourly);
+    } catch (e) {
+      debugPrint('❌ [StatsScreen] Daily stats API failed: $e — showing zeros');
+      if (mounted) setState(() => _hourlySteps = List.filled(24, 0.0));
+    }
   }
 
   // ── Chart bar data per tab ──
@@ -379,6 +398,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
     super.initState();
     _selectedPeriod = 0; // Start on THIS WEEK / TODAY / current month
     _loadPhaseLevel(); // load persisted phase level
+    _loadCache(); // load completed steps for MAX formula
     // Trigger a fresh API fetch when stats screen opens
     Future.microtask(() => ref.read(dashboardProvider.notifier).refresh());
   }

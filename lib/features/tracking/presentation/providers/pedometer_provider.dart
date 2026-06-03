@@ -171,6 +171,44 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
     });
   }
 
+  /// Resume an existing session WITHOUT resetting counters.
+  /// Used when app resumes and the backend confirms the session is still active.
+  /// This prevents the pedometer from freezing at 0 after app comes to foreground.
+  void resumeSession() {
+    _isTracking = true;
+    // DON'T reset _baseSteps, _accumulatedSteps, or state
+    // Just ensure the pedometer stream is alive
+    if (_subscription == null) {
+      _startListening();
+    }
+    // Refresh from storage in case background service updated steps
+    _refreshFromStorage();
+    debugPrint('🔄 Pedometer: resumed session (steps preserved: ${state.valueOrNull ?? 0})');
+  }
+
+  /// Resume tracking from a known accumulated total.
+  /// Used after silent sync (stop → start) to carry forward the day's step total
+  /// so new steps ADD on top instead of restarting from 0.
+  void resumeWithAccumulated(int accumulatedTotal) {
+    _isTracking = true;
+    _accumulatedSteps = accumulatedTotal;
+    _baseSteps = -1; // will re-calibrate on next pedometer event
+    _lastSyncedSteps = 0; // allow immediate sync of new steps
+    _lastMilestone = (accumulatedTotal ~/ 1000) * 1000;
+    _sessionDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    state = AsyncValue.data(accumulatedTotal);
+    // Persist so BG service + crash recovery have the right starting point
+    _persistSteps(accumulatedTotal);
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString('session_date', _sessionDate);
+    });
+    // Ensure pedometer stream is alive
+    if (_subscription == null) {
+      _startListening();
+    }
+    debugPrint('🔄 Pedometer: resumed with accumulated $accumulatedTotal steps');
+  }
+
   /// Get the current session steps only (for API stop calls)
   int get currentSessionSteps {
     return state.valueOrNull ?? 0;
@@ -215,6 +253,7 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
   }
 
   void _startListening() {
+    _subscription?.cancel();
     _subscription = Pedometer.stepCountStream.listen(
       (StepCount event) {
         if (!_isTracking) return;
@@ -230,6 +269,15 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
         
         // Persist every step for crash recovery
         _persistSteps(totalSessionSteps);
+        
+        // Also write to completed_steps_today so BG notification + stats screen
+        // always have the latest foreground total
+        SharedPreferences.getInstance().then((prefs) {
+          final existing = prefs.getInt('completed_steps_today') ?? 0;
+          if (totalSessionSteps > existing) {
+            prefs.setInt('completed_steps_today', totalSessionSteps);
+          }
+        });
 
         // ── Track per-hour steps ──
         _updateHourlySteps(totalSessionSteps);
@@ -240,8 +288,20 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
         _syncWithServerThrottled(totalSessionSteps);
       },
       onError: (error) {
-        state = AsyncValue.error(error.toString(), StackTrace.current);
+        debugPrint('⚠️ Pedometer stream error: $error — stream stays alive');
+        // Don't set error state — keep showing last known step count
       },
+      onDone: () {
+        // Stream closed unexpectedly — restart after a short delay
+        debugPrint('⚠️ Pedometer stream closed! Restarting in 2s...');
+        Future.delayed(const Duration(seconds: 2), () {
+          if (_isTracking) {
+            debugPrint('🔄 Restarting pedometer listener...');
+            _startListening();
+          }
+        });
+      },
+      cancelOnError: false, // CRITICAL: keep listening even after transient errors
     );
   }
 
@@ -280,10 +340,10 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
   void _syncWithServerThrottled(int sessionSteps) {
     if (!_isTracking) return;
     
-    // Only sync if steps actually changed by at least 20
-    if ((sessionSteps - _lastSyncedSteps).abs() > 20) {
+    // Sync if steps changed by at least 5 (lowered from 20 to catch small walks)
+    if ((sessionSteps - _lastSyncedSteps).abs() > 5) {
       if (_debounce?.isActive ?? false) _debounce?.cancel();
-      _debounce = Timer(const Duration(seconds: 3), () async {
+      _debounce = Timer(const Duration(seconds: 2), () async {
         try {
           final prefs = await SharedPreferences.getInstance();
           final sessionId = prefs.getString('active_session_id') ?? '';
@@ -299,7 +359,7 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
             debugPrint('✅ FG Sync: $sessionSteps steps');
           }
         } catch (e) {
-           // Handle silently
+           debugPrint('❌ FG Sync failed: $e');
         }
       });
     }
