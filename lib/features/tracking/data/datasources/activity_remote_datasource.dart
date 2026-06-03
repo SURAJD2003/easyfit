@@ -155,6 +155,12 @@ class ActivityRemoteDatasource {
     return _parseResponse(response.data);
   }
 
+  // GET /activity/progress → streak, phase, last7Days
+  Future<Map<String, dynamic>> getActivityProgress() async {
+    final response = await _dio.get(ApiConstants.activityProgress);
+    return _parseResponse(response.data);
+  }
+
   // GET /reports/daily?date=YYYY-MM-DD
   Future<Map<String, dynamic>> getDailyReport(String date) async {
     final response = await _dio.get(

@@ -14,4 +14,5 @@ abstract class TrackingRepository {
   });
   Future<Map<String, dynamic>> getSessionById(String id);
   Future<void> syncSteps({required String sessionId, required int steps, required int calories, required double distance});
+  Future<Map<String, dynamic>> getActivityProgress();
 }

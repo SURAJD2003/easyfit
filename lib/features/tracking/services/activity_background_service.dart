@@ -250,6 +250,50 @@ void onStart(ServiceInstance service) async {
         return;
       }
       
+      // If session is a local offline one, try to swap it for a real backend session.
+      // If that fails (still offline), skip the sync but keep counting locally.
+      if (currentSessionId.startsWith('local_')) {
+        debugPrint('📴 BG: Local session detected, attempting to get real session...');
+        try {
+          final dio = Dio(BaseOptions(
+            baseUrl: 'https://api.theeasyfitclinics.com/api',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          ));
+          
+          final startResp = await dio.post('/activity/session/start', data: {
+            'startTime': DateTime.now().toIso8601String(),
+            'baselineSteps': 0,
+          });
+          
+          dynamic respData = startResp.data;
+          if (respData is String) {
+            try { respData = await Future.value(respData).then((_) => startResp.data is String ? {} : startResp.data); } catch (_) {}
+          }
+          final realSessionId = (respData is Map) ? (respData['sessionId'] ?? respData['id'] ?? '') : '';
+          if (realSessionId.toString().isNotEmpty) {
+            await prefs.setString('active_session_id', realSessionId.toString());
+            debugPrint('✅ BG: Swapped local → real session: $realSessionId');
+            // Don't return — continue to sync with the new real session ID below
+          } else {
+            debugPrint('⚠️ BG: No session ID returned, skipping sync');
+            return;
+          }
+        } catch (e) {
+          debugPrint('📴 BG: Still offline, skipping sync — steps counting locally');
+          return; // Stay alive, retry next cycle
+        }
+      }
+      
+      // Re-read session ID in case we just swapped it
+      final activeSessionId = prefs.getString('active_session_id') ?? '';
+      if (activeSessionId.isEmpty || activeSessionId.startsWith('local_')) {
+        return; // Safety check
+      }
+      
       // We sync bgSteps (which is ONLY the current session's steps) to the backend.
       // The backend expects session steps and will sum them to get the daily total.
       final bgSteps = accumulatedBefore + currentSteps;
@@ -273,7 +317,7 @@ void onStart(ServiceInstance service) async {
       ));
       
       await dio.post('/activity/sync', data: {
-        'sessionId': currentSessionId,
+        'sessionId': activeSessionId,
         'steps': bgSteps,
         'calories': calories,
         'distance': distance,

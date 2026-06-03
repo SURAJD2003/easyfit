@@ -1356,6 +1356,7 @@ import '../providers/dashboard_provider.dart';
 import '../providers/dashboard_state.dart';
 import '../providers/pedometer_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:provider/provider.dart' as provider;
 import '../../../../providers/auth_provider.dart';
 import '../../../../core/api_client.dart';
@@ -1437,6 +1438,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   late final AnimationController _habitPulseAc;
   late final Animation<double> _habitPulse;
   Timer? _midnightTimer; // fires at 00:00 to reset daily data
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
   @override
   void initState() {
@@ -1461,7 +1463,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     _loadHabitState();
     _scheduleMidnightReset();
     _loadCompletedSteps(); // restore persisted step count after navigation/restart
-    _loadPhaseLevel(); // restore persisted phase level
+    // Phase level now comes from backend progressData API (no local persistence needed)
+    _startConnectivityListener(); // listen for online→offline transitions
     
     // Attach milestone controller & listen for milestones
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1679,6 +1682,99 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     }
   }
 
+  /// Check if device currently has internet connectivity
+  Future<bool> _isOnline() async {
+    try {
+      final result = await Connectivity().checkConnectivity();
+      return result.any((r) => r != ConnectivityResult.none);
+    } catch (_) {
+      return false; // assume offline on error
+    }
+  }
+
+  /// Listen for connectivity changes — when we come online, process pending data
+  void _startConnectivityListener() {
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
+      final online = results.any((r) => r != ConnectivityResult.none);
+      if (online) {
+        debugPrint('🌐 Connectivity restored — processing pending data');
+        _processPendingOfflineData();
+      }
+    });
+  }
+
+  /// Process any data that was queued while offline
+  Future<void> _processPendingOfflineData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final repo = ref.read(trackingRepositoryProvider);
+    
+    // 1. If we have a local session ID, swap it for a real one from backend
+    final currentSessionId = prefs.getString('active_session_id') ?? '';
+    if (currentSessionId.startsWith('local_')) {
+      debugPrint('🔄 Swapping local session for real one...');
+      try {
+        Map<String, dynamic> sessionResponse;
+        try {
+          sessionResponse = await repo.startSession(0);
+        } on DioException catch (e) {
+          if (e.response?.statusCode == 400) {
+            try {
+              await repo.stopSession(sessionId: 'force-close', finalSteps: 0, finalCalories: 0, finalDistance: 0.0);
+            } catch (_) {}
+            await Future.delayed(const Duration(milliseconds: 500));
+            sessionResponse = await repo.startSession(0);
+          } else {
+            rethrow;
+          }
+        }
+        
+        final realSessionId = sessionResponse['sessionId'] ?? sessionResponse['id'] ?? '';
+        if (realSessionId.toString().isNotEmpty) {
+          await prefs.setString('active_session_id', realSessionId.toString());
+          debugPrint('✅ Swapped local → real session: $realSessionId');
+          
+          // Restart BG service so it picks up the real session ID
+          final service = FlutterBackgroundService();
+          service.invoke('stopService');
+          await Future.delayed(const Duration(milliseconds: 500));
+          service.startService();
+        }
+      } catch (e) {
+        debugPrint('⚠️ Failed to swap local session: $e — will retry later');
+      }
+    }
+    
+    // 2. Replay any pending stop data
+    final pendingStopSession = prefs.getString('pending_stop_session_id') ?? '';
+    if (pendingStopSession.isNotEmpty && !pendingStopSession.startsWith('local_')) {
+      final pendingSteps = prefs.getInt('pending_stop_steps') ?? 0;
+      final pendingCalories = prefs.getInt('pending_stop_calories') ?? 0;
+      final pendingDistance = prefs.getDouble('pending_stop_distance') ?? 0.0;
+      
+      debugPrint('🔄 Replaying pending stop: session=$pendingStopSession, steps=$pendingSteps');
+      try {
+        await repo.stopSession(
+          sessionId: pendingStopSession,
+          finalSteps: pendingSteps,
+          finalCalories: pendingCalories,
+          finalDistance: pendingDistance,
+        );
+        debugPrint('✅ Pending stop replayed successfully');
+      } catch (e) {
+        debugPrint('⚠️ Pending stop replay failed: $e');
+      }
+      
+      // Clear pending stop data regardless (don't retry forever)
+      await prefs.remove('pending_stop_session_id');
+      await prefs.remove('pending_stop_steps');
+      await prefs.remove('pending_stop_calories');
+      await prefs.remove('pending_stop_distance');
+    }
+    
+    // 3. Refresh dashboard data from API
+    ref.read(dashboardProvider.notifier).refresh();
+  }
+
   /// Refresh tracking state from SharedPreferences when app comes to foreground
   Future<void> _refreshTrackingState() async {
     final prefs = await SharedPreferences.getInstance();
@@ -1707,6 +1803,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     // Refresh dashboard API data (fetches fresh "today" data)
     ref.read(dashboardProvider.notifier).refresh();
     
+    // Process any pending offline data if we're back online
+    _processPendingOfflineData();
+    
     debugPrint('🔄 Dashboard resumed — tracking: $hasSession');
   }
 
@@ -1714,6 +1813,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final prefs = await SharedPreferences.getInstance();
     final sessionId = prefs.getString('active_session_id');
     if (sessionId != null && sessionId.isNotEmpty) {
+      // Ensure ALL permissions are granted (critical for local_ sessions that
+      // were created offline — the BG service needs notification permission)
+      await Permission.notification.request();
+      await Permission.activityRecognition.request();
+      if (await Permission.ignoreBatteryOptimizations.isDenied) {
+        await Permission.ignoreBatteryOptimizations.request();
+      }
+      
       // Session exists locally — validate with backend by calling startSession
       // Backend will either resume the same session (if still valid) or
       // abandon the stale one and return a new session ID
@@ -1800,13 +1907,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   /// Silently start a new tracking session (no button press needed)
   Future<void> _autoStartSession() async {
     try {
-      // Request notification permission so the background service can show its persistent notification
+      // Request ALL permissions upfront
       await Permission.notification.request();
+      await Permission.activityRecognition.request();
       // Request battery optimization bypass (critical for Samsung — prevents OS from killing background service)
       if (await Permission.ignoreBatteryOptimizations.isDenied) {
         await Permission.ignoreBatteryOptimizations.request();
       }
-      // Note: activity recognition permission is handled by pedometer_provider
 
       final prefs = await SharedPreferences.getInstance();
       final repo = ref.read(trackingRepositoryProvider);
@@ -1870,7 +1977,31 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         });
       }
     } catch (e) {
-      debugPrint('❌ Auto-start failed: $e');
+      debugPrint('⚠️ Auto-start backend failed (likely offline): $e');
+      
+      // OFFLINE FALLBACK: Start tracking locally with a temp session ID.
+      // Steps will count locally. When internet returns, _processPendingOfflineData()
+      // will swap this for a real backend session ID.
+      final prefs = await SharedPreferences.getInstance();
+      final localSessionId = 'local_${DateTime.now().millisecondsSinceEpoch}';
+      await prefs.setString('active_session_id', localSessionId);
+      debugPrint('📴 Offline: created local session $localSessionId');
+      
+      // Pedometer was already started at line 1825 — it's counting
+      // Start BG service — it will count steps locally and skip API syncs for local_ sessions
+      final service = FlutterBackgroundService();
+      await Future.delayed(const Duration(milliseconds: 100));
+      service.startService();
+      
+      ref.read(dashboardProvider.notifier).startAutoRefresh();
+      
+      if (mounted) {
+        setState(() {
+          _isTracking = true;
+          _ac.repeat(reverse: true);
+          _glowAc.repeat(reverse: true);
+        });
+      }
     }
   }
 
@@ -1901,93 +2032,101 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       final sessionIdToStop = prefs.getString('active_session_id') ?? '';
       
       if (sessionIdToStop.isNotEmpty) {
-        // IMPORTANT: Stop background service FIRST to prevent race conditions
-        final service = FlutterBackgroundService();
-        service.invoke('stopService');
-        await Future.delayed(const Duration(milliseconds: 500));
+        final online = await _isOnline();
+        final isLocalSession = sessionIdToStop.startsWith('local_');
         
-        // Get the values
-        final livePedometerSteps = ref.read(pedometerProvider).value ?? 0;
-        final sessionSteps = ref.read(pedometerProvider.notifier).currentSessionSteps;
-        final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
-        // Calculate live daily total for the UI
-        final liveDailyTotal = _lastCompletedSteps + sessionSteps;
-        
-        // finalSteps is what we send to the backend for THIS SESSION ONLY.
-        // It must NOT include _lastCompletedSteps, otherwise the backend will sum the daily total repeatedly!
-        final finalSteps = math.max(sessionSteps, bgAccumulatedSteps);
-        final finalCalories = (finalSteps * 0.045).round();
-        final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
-        
-        debugPrint('📊 Silent sync: sessionSteps=$sessionSteps, liveDisplay=$livePedometerSteps, cached=$_lastCompletedSteps, final=$finalSteps');
-        
-        // SYNC first — ensures backend has latest steps even if stopSession fails
-        try {
-          await repo.syncSteps(
-            sessionId: sessionIdToStop,
-            steps: finalSteps,
-            calories: finalCalories,
-            distance: finalDistance,
-          );
-          debugPrint('✅ Pre-stop sync sent: $finalSteps steps');
-        } catch (e) {
-          debugPrint('⚠️ Pre-stop sync failed: $e');
-        }
-        
-        // STOP session → commits to backend stats/reports
-        try {
-          await repo.stopSession(
-            sessionId: sessionIdToStop,
-            finalSteps: finalSteps,
-            finalCalories: finalCalories,
-            finalDistance: finalDistance,
-          );
-        } catch (e) {
-          debugPrint('⚠️ Stop session API failed: $e');
-        }
-        
-        // Update _lastCompletedSteps: add THIS session's steps to the running daily total
-        _lastCompletedSteps = _lastCompletedSteps + finalSteps;
-        // Also consider API — it might be higher if another device synced
-        final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
-        if (apiSteps.toInt() > _lastCompletedSteps) {
-          _lastCompletedSteps = apiSteps.toInt();
-        }
-        final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-        await prefs.setInt('completed_steps_today', _lastCompletedSteps);
-        await prefs.setString('completed_steps_date', today);
-        
-        // Clear old session
-        await prefs.remove('active_session_id');
-        await prefs.remove('session_accumulated_steps');
-        
-        // IMPORTANT: startSession() resets pedometer to 0 for the new backend session.
-        // The hero card will use (_lastCompletedSteps + sessionSteps) so the UI doesn't drop to 0.
-        ref.read(pedometerProvider.notifier).startSession();
-        
-        Map<String, dynamic> sessionResponse;
-        try {
-          sessionResponse = await repo.startSession(0);
-        } on DioException catch (e) {
-          if (e.response?.statusCode == 400) {
-            try {
-              await repo.stopSession(sessionId: 'force-close', finalSteps: 0, finalCalories: 0, finalDistance: 0.0);
-            } catch (_) {}
-            await Future.delayed(const Duration(milliseconds: 500));
-            sessionResponse = await repo.startSession(0);
-          } else {
-            rethrow;
+        if (!online || isLocalSession) {
+          // OFFLINE: Don't do stop→start dance. Just keep the current session running.
+          // Steps keep counting locally. When online, _processPendingOfflineData() handles it.
+          debugPrint('📴 Silent sync skipped (offline=${ !online}, local=$isLocalSession) — keeping session alive');
+        } else {
+          // ONLINE: Normal stop → start flow
+          // IMPORTANT: Stop background service FIRST to prevent race conditions
+          final service = FlutterBackgroundService();
+          service.invoke('stopService');
+          await Future.delayed(const Duration(milliseconds: 500));
+          
+          // Get the values
+          final livePedometerSteps = ref.read(pedometerProvider).value ?? 0;
+          final sessionSteps = ref.read(pedometerProvider.notifier).currentSessionSteps;
+          final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
+          
+          // finalSteps is what we send to the backend for THIS SESSION ONLY.
+          // It must NOT include _lastCompletedSteps, otherwise the backend will sum the daily total repeatedly!
+          final finalSteps = math.max(sessionSteps, bgAccumulatedSteps);
+          final finalCalories = (finalSteps * 0.045).round();
+          final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
+          
+          debugPrint('📊 Silent sync: sessionSteps=$sessionSteps, liveDisplay=$livePedometerSteps, cached=$_lastCompletedSteps, final=$finalSteps');
+          
+          // SYNC first — ensures backend has latest steps even if stopSession fails
+          try {
+            await repo.syncSteps(
+              sessionId: sessionIdToStop,
+              steps: finalSteps,
+              calories: finalCalories,
+              distance: finalDistance,
+            );
+            debugPrint('✅ Pre-stop sync sent: $finalSteps steps');
+          } catch (e) {
+            debugPrint('⚠️ Pre-stop sync failed: $e');
           }
+          
+          // STOP session → commits to backend stats/reports
+          try {
+            await repo.stopSession(
+              sessionId: sessionIdToStop,
+              finalSteps: finalSteps,
+              finalCalories: finalCalories,
+              finalDistance: finalDistance,
+            );
+          } catch (e) {
+            debugPrint('⚠️ Stop session API failed: $e');
+          }
+          
+          // Update _lastCompletedSteps: add THIS session's steps to the running daily total
+          _lastCompletedSteps = _lastCompletedSteps + finalSteps;
+          // Also consider API — it might be higher if another device synced
+          final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
+          if (apiSteps.toInt() > _lastCompletedSteps) {
+            _lastCompletedSteps = apiSteps.toInt();
+          }
+          final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+          await prefs.setInt('completed_steps_today', _lastCompletedSteps);
+          await prefs.setString('completed_steps_date', today);
+          
+          // Clear old session
+          await prefs.remove('active_session_id');
+          await prefs.remove('session_accumulated_steps');
+          
+          // IMPORTANT: startSession() resets pedometer to 0 for the new backend session.
+          // The hero card will use (_lastCompletedSteps + sessionSteps) so the UI doesn't drop to 0.
+          ref.read(pedometerProvider.notifier).startSession();
+          
+          Map<String, dynamic> sessionResponse;
+          try {
+            sessionResponse = await repo.startSession(0);
+          } on DioException catch (e) {
+            if (e.response?.statusCode == 400) {
+              try {
+                await repo.stopSession(sessionId: 'force-close', finalSteps: 0, finalCalories: 0, finalDistance: 0.0);
+              } catch (_) {}
+              await Future.delayed(const Duration(milliseconds: 500));
+              sessionResponse = await repo.startSession(0);
+            } else {
+              rethrow;
+            }
+          }
+          
+          final newSessionId = sessionResponse['sessionId'] ?? sessionResponse['id'] ?? '';
+          if (newSessionId.toString().isNotEmpty) {
+            await prefs.setString('active_session_id', newSessionId.toString());
+            debugPrint('🟢 Silent sync done. New session: $newSessionId');
+          }
+          
+          // Restart background service with new session
+          service.startService();
         }
-        
-        final newSessionId = sessionResponse['sessionId'] ?? sessionResponse['id'] ?? '';
-        if (newSessionId.toString().isNotEmpty) {
-          await prefs.setString('active_session_id', newSessionId.toString());
-          debugPrint('🟢 Silent sync done. New session: $newSessionId');
-        }
-        
-        // Restart background service with new session
-        service.startService();
       }
       
       // Refresh dashboard data
@@ -2012,85 +2151,94 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       final sessionIdToStop = prefs.getString('active_session_id') ?? '';
       
       if (sessionIdToStop.isNotEmpty) {
-        // IMPORTANT: Stop background service FIRST to prevent race conditions
-        final service = FlutterBackgroundService();
-        service.invoke('stopService');
-        await Future.delayed(const Duration(milliseconds: 500));
+        final online = await _isOnline();
+        final isLocalSession = sessionIdToStop.startsWith('local_');
         
-        // Get the values
-        final livePedometerSteps = ref.read(pedometerProvider).value ?? 0;
-        final sessionSteps = ref.read(pedometerProvider.notifier).currentSessionSteps;
-        final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
-        // finalSteps is what we send to the backend for THIS SESSION ONLY.
-        // It must NOT include _lastCompletedSteps!
-        final finalSteps = math.max(sessionSteps, bgAccumulatedSteps);
-        final finalCalories = (finalSteps * 0.045).round();
-        final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
-        
-        // SYNC first — ensures backend has latest steps even if stopSession fails
-        try {
-          await repo.syncSteps(
-            sessionId: sessionIdToStop,
-            steps: finalSteps,
-            calories: finalCalories,
-            distance: finalDistance,
-          );
-          debugPrint('✅ Pre-stop tab sync sent: $finalSteps steps');
-        } catch (e) {
-          debugPrint('⚠️ Pre-stop tab sync failed: $e');
-        }
-        
-        // STOP session
-        try {
-          await repo.stopSession(
-            sessionId: sessionIdToStop,
-            finalSteps: finalSteps,
-            finalCalories: finalCalories,
-            finalDistance: finalDistance,
-          );
-        } catch (e) {
-          debugPrint('⚠️ Silent tab sync stop failed: $e');
-        }
-        
-        // Update _lastCompletedSteps: add THIS session's steps to the running daily total
-        _lastCompletedSteps = _lastCompletedSteps + finalSteps;
-        final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
-        if (apiSteps.toInt() > _lastCompletedSteps) {
-          _lastCompletedSteps = apiSteps.toInt();
-        }
-        final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-        await prefs.setInt('completed_steps_today', _lastCompletedSteps);
-        await prefs.setString('completed_steps_date', today);
-        
-        // Clear old session
-        await prefs.remove('active_session_id');
-        await prefs.remove('session_accumulated_steps');
-        
-        // IMPORTANT: startSession() resets pedometer to 0 for the new backend session.
-        ref.read(pedometerProvider.notifier).startSession();
-        
-        Map<String, dynamic> sessionResponse;
-        try {
-          sessionResponse = await repo.startSession(0);
-        } on DioException catch (e) {
-          if (e.response?.statusCode == 400) {
-            try {
-              await repo.stopSession(sessionId: 'force-close', finalSteps: 0, finalCalories: 0, finalDistance: 0.0);
-            } catch (_) {}
-            await Future.delayed(const Duration(milliseconds: 500));
-            sessionResponse = await repo.startSession(0);
-          } else {
-            rethrow;
+        if (!online || isLocalSession) {
+          // OFFLINE: Don't do stop→start dance. Just keep the current session running.
+          debugPrint('📴 Tab sync skipped (offline=${ !online}, local=$isLocalSession) — keeping session alive');
+        } else {
+          // ONLINE: Normal stop → start flow
+          // IMPORTANT: Stop background service FIRST to prevent race conditions
+          final service = FlutterBackgroundService();
+          service.invoke('stopService');
+          await Future.delayed(const Duration(milliseconds: 500));
+          
+          // Get the values
+          final livePedometerSteps = ref.read(pedometerProvider).value ?? 0;
+          final sessionSteps = ref.read(pedometerProvider.notifier).currentSessionSteps;
+          final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
+          // finalSteps is what we send to the backend for THIS SESSION ONLY.
+          // It must NOT include _lastCompletedSteps!
+          final finalSteps = math.max(sessionSteps, bgAccumulatedSteps);
+          final finalCalories = (finalSteps * 0.045).round();
+          final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
+          
+          // SYNC first — ensures backend has latest steps even if stopSession fails
+          try {
+            await repo.syncSteps(
+              sessionId: sessionIdToStop,
+              steps: finalSteps,
+              calories: finalCalories,
+              distance: finalDistance,
+            );
+            debugPrint('✅ Pre-stop tab sync sent: $finalSteps steps');
+          } catch (e) {
+            debugPrint('⚠️ Pre-stop tab sync failed: $e');
           }
+          
+          // STOP session
+          try {
+            await repo.stopSession(
+              sessionId: sessionIdToStop,
+              finalSteps: finalSteps,
+              finalCalories: finalCalories,
+              finalDistance: finalDistance,
+            );
+          } catch (e) {
+            debugPrint('⚠️ Silent tab sync stop failed: $e');
+          }
+          
+          // Update _lastCompletedSteps: add THIS session's steps to the running daily total
+          _lastCompletedSteps = _lastCompletedSteps + finalSteps;
+          final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
+          if (apiSteps.toInt() > _lastCompletedSteps) {
+            _lastCompletedSteps = apiSteps.toInt();
+          }
+          final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+          await prefs.setInt('completed_steps_today', _lastCompletedSteps);
+          await prefs.setString('completed_steps_date', today);
+          
+          // Clear old session
+          await prefs.remove('active_session_id');
+          await prefs.remove('session_accumulated_steps');
+          
+          // IMPORTANT: startSession() resets pedometer to 0 for the new backend session.
+          ref.read(pedometerProvider.notifier).startSession();
+          
+          Map<String, dynamic> sessionResponse;
+          try {
+            sessionResponse = await repo.startSession(0);
+          } on DioException catch (e) {
+            if (e.response?.statusCode == 400) {
+              try {
+                await repo.stopSession(sessionId: 'force-close', finalSteps: 0, finalCalories: 0, finalDistance: 0.0);
+              } catch (_) {}
+              await Future.delayed(const Duration(milliseconds: 500));
+              sessionResponse = await repo.startSession(0);
+            } else {
+              rethrow;
+            }
+          }
+          
+          final newSessionId = sessionResponse['sessionId'] ?? sessionResponse['id'] ?? '';
+          if (newSessionId.toString().isNotEmpty) {
+            await prefs.setString('active_session_id', newSessionId.toString());
+          }
+          
+          // Restart background service with new session
+          service.startService();
         }
-        
-        final newSessionId = sessionResponse['sessionId'] ?? sessionResponse['id'] ?? '';
-        if (newSessionId.toString().isNotEmpty) {
-          await prefs.setString('active_session_id', newSessionId.toString());
-        }
-        
-        // Restart background service with new session
-        service.startService();
       }
       
       // Refresh dashboard data
@@ -2103,6 +2251,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _connectivitySub?.cancel();
     _ac.dispose();
     _glowAc.dispose();
     _habitPulseAc.dispose();
@@ -3460,61 +3609,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     );
   }
 
-  // ── PHASE PERSISTENCE ────────────────────────────────────
-  /// Load persisted phase level from SharedPreferences
-  Future<void> _loadPhaseLevel() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getInt('current_phase_level') ?? 0;
-    if (mounted) setState(() => _currentPhaseLevel = saved);
-  }
-
-  /// Save current phase level to SharedPreferences
-  Future<void> _savePhaseLevel(int level) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('current_phase_level', level);
-  }
-
-  /// Check weekly data and promote phase if user has 3 consecutive days
-  /// of completing the current phase goal.
-  void _checkPhasePromotion(List<dynamic> daysList, int currentSteps) {
-    if (_currentPhaseLevel >= 4) return; // already at Limit Zone
-    final goal = _getPhaseGoalForLevel(_currentPhaseLevel);
-    
-    // Count consecutive days (most recent first) where user met the goal
-    final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    int consecutiveDays = 0;
-    
-    // Check today first
-    if (currentSteps >= goal) {
-      consecutiveDays = 1;
-    } else {
-      return; // today not met, can't have 3 consecutive ending today
+  // ── PHASE HELPERS (backend-driven) ────────────────────────
+  /// Map phase name from API → level index for icon lookup
+  static int _getPhaseLevelFromName(String? phaseName) {
+    if (phaseName == null) return 0;
+    for (int i = 0; i < _phaseNames.length; i++) {
+      if (_phaseNames[i].toLowerCase() == phaseName.toLowerCase()) return i;
     }
-    
-    // Sort days by date descending and walk backwards from yesterday
-    final sortedDays = List<Map<String, dynamic>>.from(
-      daysList.map((d) => d as Map<String, dynamic>)
-    )..sort((a, b) => (b['date'] ?? '').compareTo(a['date'] ?? ''));
-    
-    for (final d in sortedDays) {
-      final dateStr = d['date'] ?? '';
-      if (dateStr == todayStr) continue; // already counted
-      if (dateStr.compareTo(todayStr) > 0) continue; // skip future dates
-      final daySteps = ((d['steps'] ?? 0) as num).toInt();
-      if (daySteps >= goal) {
-        consecutiveDays++;
-      } else {
-        break;
-      }
-    }
-    
-    // Promote if 3+ consecutive days
-    if (consecutiveDays >= 3 && _currentPhaseLevel < 4) {
-      final newLevel = _currentPhaseLevel + 1;
-      setState(() => _currentPhaseLevel = newLevel);
-      _savePhaseLevel(newLevel);
-      debugPrint('🎯 Phase promoted! Level $newLevel after $consecutiveDays consecutive days');
-    }
+    // Fuzzy match: check if the phase name contains a keyword
+    final lower = phaseName.toLowerCase();
+    if (lower.contains('activation')) return 0;
+    if (lower.contains('fat')) return 1;
+    if (lower.contains('metabolic')) return 2;
+    if (lower.contains('transformation')) return 3;
+    if (lower.contains('limit')) return 4;
+    return 0;
   }
 
   // ── STEP PHASE HELPER ──────────────────────────────────
@@ -3590,6 +3699,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 
   /// Goal for each phase — now uses persisted level
   int _getPhaseGoal(int steps) {
+    // Use backend progressData if available, otherwise fall back to local level
+    final progress = ref.read(dashboardProvider).progressData;
+    if (progress != null && progress['currentPhaseGoal'] != null) {
+      return (progress['currentPhaseGoal'] as num).toInt();
+    }
     return _getPhaseGoalForLevel(_currentPhaseLevel);
   }
 
@@ -3610,8 +3724,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final calories = rawCalories.toInt();
     
     final goal = _getPhaseGoal(steps);
-    final progress = (steps / goal).clamp(0.0, 1.0);
-    final phaseName = _getPhaseNameForLevel(_currentPhaseLevel);
+    final progressFraction = (steps / goal).clamp(0.0, 1.0);
+    final progressInfo = ref.read(dashboardProvider).progressData;
+    final phaseName = progressInfo?['currentPhaseName'] ?? _getPhaseNameForLevel(_currentPhaseLevel);
     
     return Padding(
       padding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
@@ -3637,7 +3752,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 return AspectRatio(
                   aspectRatio: 1.4,
                   child: CustomPaint(
-                    painter: _HeroArcPainter(progress: _ring.value * progress),
+                    painter: _HeroArcPainter(progress: _ring.value * progressFraction),
                     child: Padding(
                       padding: const EdgeInsets.only(top: 40),
                       child: Column(
@@ -3761,77 +3876,78 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 
   // ── PREMIUM STREAK CARD ──────────────────────────────────
   Widget _premiumStreakCard() {
-    // Get current steps for phase calculation
+    // ── READ FROM BACKEND PROGRESS API ──────────────────────
     final state = ref.watch(dashboardProvider);
+    final progress = state.progressData;
+    
+    // Get current steps for "remaining" display
     final apiSteps = ((state.todayActivity?['steps'] ?? 0) as num).toInt();
     final liveSteps = ref.watch(pedometerProvider).valueOrNull ?? 0;
     final liveDailyTotal = _lastCompletedSteps + liveSteps;
     final currentSteps = math.max(apiSteps, liveDailyTotal);
     
-    // Use persisted phase level (advances only after 3 consecutive days)
-    final currentPhase = _getPhaseNameForLevel(_currentPhaseLevel);
-    final nextPhase = _getNextPhaseNameForLevel(_currentPhaseLevel);
-    final phaseGoal = _getPhaseGoalForLevel(_currentPhaseLevel);
-    final remaining = _stepsToCompleteGoal(currentSteps, _currentPhaseLevel);
-
-    // Calculate streak: how many consecutive days (including today) the user
-    // completed the current phase goal.
-    final weeklyData = state.weeklyStats ?? {};
-    final daysList = (weeklyData['days'] as List<dynamic>?) ?? [];
-
-    int streakDays = 0;
-    final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    // Phase info from backend
+    final currentPhase = (progress?['currentPhaseName'] ?? _getPhaseNameForLevel(_currentPhaseLevel)).toString();
+    final phaseGoal = (progress?['currentPhaseGoal'] as num?)?.toInt() ?? _getPhaseGoalForLevel(_currentPhaseLevel);
+    final phaseLevel = _getPhaseLevelFromName(currentPhase);
+    final nextPhase = phaseLevel >= 4 ? null : _phaseNames[phaseLevel + 1];
+    final remaining = (phaseGoal - currentSteps).clamp(0, phaseGoal);
     
-    // Check if today's steps meet the goal
-    if (currentSteps >= phaseGoal) {
-      streakDays = 1;
+    // Streak from backend
+    final streakDays = ((progress?['currentStreak'] ?? 0) as num).toInt().clamp(0, 7);
+    final daysCompleted = ((progress?['daysCompletedInPhase'] ?? 0) as num).toInt();
+    final daysNeeded = ((progress?['daysNeededForNextPhase'] ?? 3) as num).toInt();
+    
+    // Update local phase level from backend (for icon lookups elsewhere)
+    if (phaseLevel != _currentPhaseLevel) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _currentPhaseLevel = phaseLevel);
+      });
     }
     
-    if (daysList.isNotEmpty) {
-      // Sort days by date descending so we walk backwards from most recent
-      final sortedDays = List<Map<String, dynamic>>.from(
-        daysList.map((d) => d as Map<String, dynamic>)
-      )..sort((a, b) => (b['date'] ?? '').compareTo(a['date'] ?? ''));
-      
-      // Walk backwards from yesterday (skip today, skip future dates)
-      for (final d in sortedDays) {
-        final dateStr = d['date'] ?? '';
-        if (dateStr == todayStr) continue; // skip today (already counted above)
-        if (dateStr.compareTo(todayStr) > 0) continue; // skip future dates
-        final daySteps = ((d['steps'] ?? 0) as num).toInt();
-        if (daySteps >= phaseGoal) {
-          streakDays++;
-        } else {
-          break; // streak broken
+    debugPrint('🔥 Streak: $streakDays days (phase: $currentPhase, goal: $phaseGoal, today: $currentSteps)');
+
+    // ── BUILD DAY LABELS & TICK MARKS FROM last7Days ──────────
+    final last7Days = (progress?['last7Days'] as List<dynamic>?) ?? [];
+    
+    // Build day labels from the API data, or fall back to generated labels
+    final allDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    List<String> dayLabels;
+    List<int> doneIndices = [];
+    const currentIndex = 6; // today is always rightmost
+    
+    if (last7Days.length >= 7) {
+      // Use the API's last7Days data directly
+      dayLabels = List.generate(7, (i) {
+        final dateStr = (last7Days[i]['date'] ?? '').toString();
+        try {
+          final dt = DateTime.parse(dateStr);
+          return allDays[dt.weekday % 7];
+        } catch (_) {
+          return '—';
+        }
+      });
+      // Mark days where goalMet is true
+      for (int i = 0; i < 7; i++) {
+        final goalMet = last7Days[i]['goalMet'] ?? false;
+        if (goalMet == true) {
+          doneIndices.add(i);
         }
       }
+    } else {
+      // Fallback: generate labels from current date, use streak count
+      dayLabels = List.generate(7, (i) {
+        final d = DateTime.now().subtract(Duration(days: 6 - i));
+        return allDays[d.weekday % 7];
+      });
+      doneIndices = List.generate(streakDays, (i) => 6 - i);
     }
-    streakDays = streakDays.clamp(0, 7);
-    debugPrint('🔥 Streak: $streakDays days (goal: $phaseGoal, today: $currentSteps)');
 
-    // Check for phase promotion (3 consecutive days)
-    if (daysList.isNotEmpty) {
-      _checkPhasePromotion(daysList, currentSteps);
-    }
-
-    // Build day labels: last 7 days ending at today (today = rightmost)
-    final allDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    final dayLabels = List.generate(7, (i) {
-      final d = DateTime.now().subtract(Duration(days: 6 - i));
-      return allDays[d.weekday % 7];
-    });
-
-    // Today is always the last dot (index 6)
-    const currentIndex = 6;
-    // Mark streak days: count backwards from today (index 6)
-    final doneIndices = List.generate(streakDays, (i) => 6 - i);
-
-    // Show how many days of consistency achieved out of 3 needed
-    final daysNeeded = 3;
+    // Subtitle
     final streakSubtitle = nextPhase != null
-        ? (streakDays >= daysNeeded
+        ? (daysCompleted >= daysNeeded
             ? '🎯 $streakDays day streak! Advancing to $nextPhase'
-            : '$streakDays/$daysNeeded days to unlock $nextPhase • ${remaining > 0 ? "$remaining steps left today" : "✅ Today\'s goal done!"}')
+            : '$daysCompleted/$daysNeeded days to unlock $nextPhase • ${remaining > 0 ? "$remaining steps left today" : "✅ Today\'s goal done!"}')
         : '🔥 $streakDays day streak in Limit Zone!';
 
     return Padding(
@@ -3861,7 +3977,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                         border: Border.all(color: _T.accent.withOpacity(0.4 + _glow.value * 0.2), width: 1.5),
                         boxShadow: [BoxShadow(color: _T.accent.withOpacity(0.2 + _glow.value * 0.15), blurRadius: 12)],
                       ),
-                      child: Icon(_getPhaseIconForLevel(_currentPhaseLevel), color: _T.accent, size: 24),
+                      child: Icon(_getPhaseIconForLevel(phaseLevel), color: _T.accent, size: 24),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -3884,7 +4000,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                         ),
                         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
                         child: Column(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
-                          Icon(_getPhaseIconForLevel(_currentPhaseLevel), color: _T.accent, size: 20),
+                          Icon(_getPhaseIconForLevel(phaseLevel), color: _T.accent, size: 20),
                           const SizedBox(height: 4),
                           Text(currentPhase.toUpperCase(), textAlign: TextAlign.center, style: GoogleFonts.inter(fontSize: 8, fontWeight: FontWeight.w800, color: _T.accent, letterSpacing: 0.4, height: 1.2)),
                           const SizedBox(height: 4),
@@ -4435,7 +4551,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 );
               } catch (e) {
                 debugPrint('⚠️ Stop session API failed (session may have been auto-closed): $e');
-                // Don't throw — session might have been auto-closed by backend
+                // OFFLINE: Queue the stop data for replay when online
+                if (!sessionIdToStop.startsWith('local_')) {
+                  await prefs.setString('pending_stop_session_id', sessionIdToStop);
+                  await prefs.setInt('pending_stop_steps', finalSteps);
+                  await prefs.setInt('pending_stop_calories', finalCalories);
+                  await prefs.setDouble('pending_stop_distance', finalDistance);
+                  debugPrint('📴 Queued pending stop for session $sessionIdToStop');
+                }
               }
             }
             
@@ -4462,34 +4585,60 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             }
           }
         } catch (e) {
-          // On ANY error during start/stop, reset UI so user can retry
+          // On ANY error during start/stop, handle gracefully
           debugPrint('❌ START/STOP FAILED: $e');
           if (e is DioException) {
             debugPrint('❌ Status: ${e.response?.statusCode}');
             debugPrint('❌ Response: ${e.response?.data}');
           }
           
-          // Reset tracking state so user isn't stuck
-          if (mounted) {
-            setState(() {
-              _isTracking = !shouldStart; // revert the toggle
-              if (!_isTracking) {
-                _ac.stop(); _glowAc.stop();
-              }
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  shouldStart ? 'Failed to start session. Please try again.' : 'Failed to stop session. Please try again.',
-                  style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600),
-                ),
-                backgroundColor: Colors.redAccent,
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                margin: const EdgeInsets.all(16),
-                duration: const Duration(seconds: 3),
-              )
-            );
+          if (shouldStart) {
+            // START failed (likely offline) — use local session so tracking works
+            final localSessionId = 'local_${DateTime.now().millisecondsSinceEpoch}';
+            await prefs.setString('active_session_id', localSessionId);
+            debugPrint('📴 Offline: created local session $localSessionId');
+            
+            // Pedometer was already started — it's counting
+            // Start BG service for local counting
+            await Future.delayed(const Duration(milliseconds: 100));
+            FlutterBackgroundService().startService();
+            ref.read(dashboardProvider.notifier).startAutoRefresh();
+            
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('📴 Offline mode — steps will sync when online', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600)),
+                  backgroundColor: _T.card2,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  margin: const EdgeInsets.all(16),
+                  duration: const Duration(seconds: 3),
+                )
+              );
+            }
+          } else {
+            // STOP failed — revert UI so user can retry
+            if (mounted) {
+              setState(() {
+                _isTracking = !shouldStart; // revert the toggle
+                if (!_isTracking) {
+                  _ac.stop(); _glowAc.stop();
+                }
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Failed to stop session. Please try again.',
+                    style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600),
+                  ),
+                  backgroundColor: Colors.redAccent,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  margin: const EdgeInsets.all(16),
+                  duration: const Duration(seconds: 3),
+                )
+              );
+            }
           }
         }
       },

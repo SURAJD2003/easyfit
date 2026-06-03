@@ -2,6 +2,7 @@ class DashboardState {
   final Map<String, dynamic>? todayActivity;
   final Map<String, dynamic>? weeklyStats;
   final Map<String, dynamic>? monthlyStats;
+  final Map<String, dynamic>? progressData;
   final List<dynamic>? history;
   final bool isLoading;
   final String? error;
@@ -10,6 +11,7 @@ class DashboardState {
     this.todayActivity,
     this.weeklyStats,
     this.monthlyStats,
+    this.progressData,
     this.history,
     this.isLoading = false,
     this.error,
@@ -19,6 +21,7 @@ class DashboardState {
     Map<String, dynamic>? todayActivity,
     Map<String, dynamic>? weeklyStats,
     Map<String, dynamic>? monthlyStats,
+    Map<String, dynamic>? progressData,
     List<dynamic>? history,
     bool? isLoading,
     String? error,
@@ -27,6 +30,7 @@ class DashboardState {
       todayActivity: todayActivity ?? this.todayActivity,
       weeklyStats: weeklyStats ?? this.weeklyStats,
       monthlyStats: monthlyStats ?? this.monthlyStats,
+      progressData: progressData ?? this.progressData,
       history: history ?? this.history,
       isLoading: isLoading ?? this.isLoading,
       error: error ?? this.error,

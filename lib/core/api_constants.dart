@@ -26,6 +26,7 @@ class ApiConstants {
   static const String activitySessionStart = '/activity/session/start';
   static const String activitySessionStop = '/activity/session/stop';
   static const String activitySync = '/activity/sync';
+  static const String activityProgress = '/activity/progress';
 
   static String activitySessionById(String id) => '/activity/session/$id';
 

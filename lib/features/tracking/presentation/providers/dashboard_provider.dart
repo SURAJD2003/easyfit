@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:dio/dio.dart';
 import '../../data/datasources/activity_remote_datasource.dart';
 import '../../data/repositories/tracking_repository_impl.dart';
 import '../../domain/repositories/tracking_repository.dart';
@@ -72,6 +73,7 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
     Map<String, dynamic>? today;
     Map<String, dynamic>? weekly;
     Map<String, dynamic>? monthly;
+    Map<String, dynamic>? progress;
     List<dynamic>? historyList;
 
     final now = DateTime.now();
@@ -114,15 +116,27 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
       historyList = historyMap['data'] ?? historyMap['sessions'] ?? [];
     } catch (e) { print('❌ HISTORY API error: $e'); }
     
+    try { 
+      progress = await repo.getActivityProgress(); 
+      print('📊 PROGRESS API response: $progress');
+    } catch (e) { 
+      if (e is DioException) {
+        print('❌ PROGRESS API error: ${e.response?.statusCode} - ${e.response?.data}');
+      } else {
+        print('❌ PROGRESS API error: $e'); 
+      }
+    }
+    
     state = state.copyWith(
       todayActivity: today,
       weeklyStats: weekly,
       monthlyStats: monthly,
+      progressData: progress,
       history: historyList ?? [],
       isLoading: false,
       error: null,
     );
-    print('📊 Final DashboardState → today: ${state.todayActivity}, weekly: ${state.weeklyStats}');
+    print('📊 Final DashboardState → today: ${state.todayActivity}, weekly: ${state.weeklyStats}, progress: ${state.progressData}');
   }
 
   /// Fetch weekly stats for a specific date range

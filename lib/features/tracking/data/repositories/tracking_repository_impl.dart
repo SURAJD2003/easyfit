@@ -60,4 +60,9 @@ class TrackingRepositoryImpl implements TrackingRepository {
   Future<void> syncSteps({required String sessionId, required int steps, required int calories, required double distance}) {
     return remoteDatasource.syncSteps(sessionId: sessionId, steps: steps, calories: calories, distance: distance);
   }
+
+  @override
+  Future<Map<String, dynamic>> getActivityProgress() {
+    return remoteDatasource.getActivityProgress();
+  }
 }
