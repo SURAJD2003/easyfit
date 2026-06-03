@@ -219,16 +219,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     // ── SIGN UP BUTTON ──
                     _buildSignUpButton(),
 
-                    const SizedBox(height: 28),
-
-                    // ── DIVIDER ──
-                    _buildDivider(),
-
-                    const SizedBox(height: 20),
-
-                    // ── SOCIAL LOGIN ──
-                    _buildSocialButton(),
-
                     const SizedBox(height: 32),
 
                     // ── FOOTER ──
@@ -505,81 +495,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  Widget _buildDivider() {
-    return Row(
-      children: [
-        Expanded(
-          child: Container(
-            height: 1,
-            color: Colors.white.withOpacity(0.1),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text(
-            'or continue with',
-            style: GoogleFonts.poppins(
-              fontSize: 12,
-              fontWeight: FontWeight.w400,
-              color: Colors.white54,
-            ),
-          ),
-        ),
-        Expanded(
-          child: Container(
-            height: 1,
-            color: Colors.white.withOpacity(0.1),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSocialButton() {
-    return SizedBox(
-      width: double.infinity,
-      height: 48,
-      child: OutlinedButton(
-        onPressed: () => _showSnackBar('Coming soon!'),
-        style: OutlinedButton.styleFrom(
-          side: BorderSide(
-            color: Colors.white.withOpacity(0.15),
-            width: 1,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Image.asset(
-              'assets/icons/google.png',
-              height: 20,
-              width: 20,
-              errorBuilder: (context, error, stackTrace) {
-                return Icon(
-                  Icons.account_circle_outlined,
-                  size: 20,
-                  color: Colors.white70,
-                );
-              },
-            ),
-            const SizedBox(width: 12),
-            Text(
-              'Continue with Google',
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: Colors.white70,
-                letterSpacing: 0.3,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _buildFooter() {
     return Center(
