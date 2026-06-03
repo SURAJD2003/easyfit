@@ -17,83 +17,42 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _otpController = TextEditingController();
 
   bool _obscurePassword = true;
   bool _isLoading = false;
-  int _authMode = 0; // 0 = Email/Password, 1 = Email OTP
-  bool _otpSent = false;
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
-    _otpController.dispose();
     super.dispose();
   }
 
   void _handleLogin() async {
-    if (_authMode == 0) {
-      // Email/Password login
-      if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) return;
 
-      final authProvider = context.read<AuthProvider>();
+    final authProvider = context.read<AuthProvider>();
 
-      await authProvider.login(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-      );
+    await authProvider.login(
+      email: _emailController.text.trim(),
+      password: _passwordController.text,
+    );
 
-      if (!mounted) return;
+    if (!mounted) return;
 
-      if (authProvider.status == AuthStatus.success) {
-        _showSnackBar('Login successful!');
-        await authProvider.fetchSubscriptionStatus();
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (mounted) {
-          if (authProvider.isApproved) {
-            context.go(RouteNames.dashboard);
-          } else {
-            context.go(RouteNames.approvalPending);
-          }
-        }
-      } else if (authProvider.status == AuthStatus.error) {
-        _showSnackBar(authProvider.errorMessage ?? 'Login failed');
-      }
-    } else {
-      // OTP login
-      if (_otpController.text.isEmpty) {
-        _showSnackBar('Please enter OTP');
-        return;
-      }
-      setState(() => _isLoading = true);
-      await Future.delayed(const Duration(milliseconds: 1500));
+    if (authProvider.status == AuthStatus.success) {
+      _showSnackBar('Login successful!');
+      await authProvider.fetchSubscriptionStatus();
+      await Future.delayed(const Duration(milliseconds: 500));
       if (mounted) {
-        setState(() => _isLoading = false);
-        // OTP login usually for users, check approval
-        final authProvider = context.read<AuthProvider>();
         if (authProvider.isApproved) {
           context.go(RouteNames.dashboard);
         } else {
           context.go(RouteNames.approvalPending);
         }
       }
-    }
-  }
-
-  void _handleSendOtp() async {
-    if (_emailController.text.trim().isEmpty) {
-      _showSnackBar('Please enter your email');
-      return;
-    }
-    setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 1000));
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-        _otpSent = true;
-      });
-      _showSnackBar('OTP sent to your email');
+    } else if (authProvider.status == AuthStatus.error) {
+      _showSnackBar(authProvider.errorMessage ?? 'Login failed');
     }
   }
 
@@ -130,33 +89,15 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     const SizedBox(height: 36),
 
-                    // ── AUTH MODE TOGGLE ──
-                    _buildAuthToggle(),
-
-                    const SizedBox(height: 32),
-
-                    // ── FORM ──
                     Form(
                       key: _formKey,
-                      child: _authMode == 0
-                          ? _buildPasswordForm()
-                          : _buildOtpForm(),
+                      child: _buildPasswordForm(),
                     ),
 
                     const SizedBox(height: 24),
 
                     // ── PRIMARY BUTTON ──
                     _buildSignInButton(),
-
-                    const SizedBox(height: 28),
-
-                    // ── DIVIDER ──
-                    _buildDivider(),
-
-                    const SizedBox(height: 20),
-
-                    // ── SOCIAL LOGIN ──
-                    _buildSocialButton(),
 
                     const SizedBox(height: 32),
 
@@ -248,62 +189,6 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildAuthToggle() {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
-      ),
-      padding: const EdgeInsets.all(4),
-      child: Row(
-        children: [
-          _buildToggleTab(
-            label: 'Email & Password',
-            index: 0,
-            isSelected: _authMode == 0,
-            onTap: () => setState(() => _authMode = 0),
-          ),
-          _buildToggleTab(
-            label: 'OTP',
-            index: 1,
-            isSelected: _authMode == 1,
-            onTap: () => setState(() => _authMode = 1),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildToggleTab({
-    required String label,
-    required int index,
-    required bool isSelected,
-    required VoidCallback onTap,
-  }) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFF2A2A2A) : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: isSelected ? const Color(0xFFFF7A00) : Colors.white54,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildPasswordForm() {
     return Column(
       children: [
@@ -358,46 +243,6 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         ),
-      ],
-    );
-  }
-
-  Widget _buildOtpForm() {
-    return Column(
-      children: [
-        _buildInputField(
-          label: 'Email Address',
-          controller: _emailController,
-          hint: 'your@email.com',
-          keyboardType: TextInputType.emailAddress,
-          validator: (value) {
-            if (value?.isEmpty ?? true) return 'Email is required';
-            if (!RegExp(
-              r'^[a-zA-Z0-9._%-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-            ).hasMatch(value!)) {
-              return 'Enter a valid email';
-            }
-            return null;
-          },
-        ),
-        if (_otpSent) ...[
-          const SizedBox(height: 16),
-          _buildInputField(
-            label: 'Enter OTP',
-            controller: _otpController,
-            hint: '000000',
-            keyboardType: TextInputType.number,
-            maxLength: 6,
-            validator: (value) {
-              if (value?.isEmpty ?? true) return 'OTP is required';
-              if (value!.length != 6) return 'OTP must be 6 digits';
-              return null;
-            },
-          ),
-        ] else ...[
-          const SizedBox(height: 16),
-          _buildSendOtpButton(),
-        ],
       ],
     );
   }
@@ -509,7 +354,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   )
                 : Text(
-                    _authMode == 0 ? 'Sign In' : 'Verify OTP',
+                    'Sign In',
                     style: GoogleFonts.poppins(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -520,110 +365,6 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
       },
-    );
-  }
-
-  Widget _buildSendOtpButton() {
-    return SizedBox(
-      width: double.infinity,
-      height: 48,
-      child: OutlinedButton(
-        onPressed: _isLoading ? null : _handleSendOtp,
-        style: OutlinedButton.styleFrom(
-          side: BorderSide(
-            color: const Color(0xFFFF7A00).withOpacity(0.7),
-            width: 1.5,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-        ),
-        child: _isLoading
-            ? SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: const AlwaysStoppedAnimation(Color(0xFFFF7A00)),
-                ),
-              )
-            : Text(
-                'Send OTP',
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFFFF7A00),
-                  letterSpacing: 0.5,
-                ),
-              ),
-      ),
-    );
-  }
-
-  Widget _buildDivider() {
-    return Row(
-      children: [
-        Expanded(
-          child: Container(height: 1, color: Colors.white.withOpacity(0.1)),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text(
-            'or continue with',
-            style: GoogleFonts.poppins(
-              fontSize: 12,
-              fontWeight: FontWeight.w400,
-              color: Colors.white54,
-            ),
-          ),
-        ),
-        Expanded(
-          child: Container(height: 1, color: Colors.white.withOpacity(0.1)),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSocialButton() {
-    return SizedBox(
-      width: double.infinity,
-      height: 48,
-      child: OutlinedButton(
-        onPressed: () => _showSnackBar('Coming soon!'),
-        style: OutlinedButton.styleFrom(
-          side: BorderSide(color: Colors.white.withOpacity(0.15), width: 1),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Image.asset(
-              'assets/icons/google.png',
-              height: 20,
-              width: 20,
-              errorBuilder: (context, error, stackTrace) {
-                return Icon(
-                  Icons.account_circle_outlined,
-                  size: 20,
-                  color: Colors.white70,
-                );
-              },
-            ),
-            const SizedBox(width: 12),
-            Text(
-              'Continue with Google',
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: Colors.white70,
-                letterSpacing: 0.3,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
