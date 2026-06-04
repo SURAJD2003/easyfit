@@ -3622,7 +3622,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     }
     // Fuzzy match: check if the phase name contains a keyword
     final lower = phaseName.toLowerCase();
-    if (lower.contains('activation')) return 0;
+    if (lower.contains('beginner') || lower.contains('activation')) return 0;
     if (lower.contains('fat')) return 1;
     if (lower.contains('metabolic')) return 2;
     if (lower.contains('transformation')) return 3;
@@ -3633,7 +3633,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   // ── STEP PHASE HELPER ──────────────────────────────────
   /// Phase names by level index
   static const _phaseNames = [
-    'Activation Phase',     // level 0: goal 5000
+    'Beginner Phase',       // level 0: goal 5000
     'Fat Loss Phase',       // level 1: goal 7000
     'Metabolic Phase',      // level 2: goal 10000
     'Transformation Phase', // level 3: goal 12000
@@ -3641,7 +3641,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   ];
   static const _phaseGoals = [5000, 7000, 10000, 12000, 15000];
   static const _phaseIcons = [
-    Icons.rocket_launch_rounded,    // level 0: Activation Phase
+    Icons.rocket_launch_rounded,    // level 0: Beginner Phase
     Icons.local_fire_department_rounded, // level 1: Fat Loss Phase
     Icons.bolt_rounded,             // level 2: Metabolic Phase
     Icons.fitness_center_rounded,   // level 3: Transformation Phase
@@ -3678,7 +3678,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   // ── LEGACY HELPERS (used by hero card) ─────────────────
   /// Returns the phase name based on current step count (for display only).
   static String _getPhaseName(int steps) {
-    if (steps <= 5000) return 'Activation Phase';
+    if (steps <= 5000) return 'Beginner Phase';
     if (steps <= 7000) return 'Fat Loss Phase';
     if (steps <= 10000) return 'Metabolic Phase';
     if (steps <= 12000) return 'Transformation Phase';

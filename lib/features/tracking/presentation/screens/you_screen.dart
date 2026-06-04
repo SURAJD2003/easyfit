@@ -50,7 +50,7 @@ class _YouScreenState extends State<YouScreen> {
   }
 
   static const _phaseNames = [
-    'Activation Phase',
+    'Beginner Phase',
     'Fat Loss Phase',
     'Metabolic Phase',
     'Transformation Phase',
@@ -66,7 +66,7 @@ class _YouScreenState extends State<YouScreen> {
     final initial = name.isNotEmpty ? name[0].toUpperCase() : 'G';
 
     final phaseData = [
-      {'icon': Icons.rocket_launch_rounded,         'name': 'Activation Phase',     'range': '0 – 5,000 steps',       'color': const Color(0xFF4FC3F7), 'level': 0},
+      {'icon': Icons.rocket_launch_rounded,         'name': 'Beginner Phase',       'range': '0 – 5,000 steps',       'color': const Color(0xFF4FC3F7), 'level': 0},
       {'icon': Icons.local_fire_department_rounded, 'name': 'Fat Loss Phase',        'range': '5,001 – 7,000 steps',   'color': const Color(0xFFFF6B2B), 'level': 1},
       {'icon': Icons.bolt_rounded,                  'name': 'Metabolic Phase',       'range': '7,001 – 10,000 steps',  'color': const Color(0xFFFFCC00), 'level': 2},
       {'icon': Icons.fitness_center_rounded,        'name': 'Transformation Phase',  'range': '10,001 – 12,000 steps', 'color': const Color(0xFFBF5AF2), 'level': 3},
