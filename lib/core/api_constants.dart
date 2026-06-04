@@ -10,8 +10,9 @@ class ApiConstants {
   static const String refreshToken = '/auth/refresh-token';
 
   // ── User ──────────────────────────────────────────────
-  static const String userProfile    = '/user/profile';
-  static const String deleteAccount  = '/user/account';
+  static const String userProfile = '/user/profile';
+  static const String deleteAccount = '/user/account';
+  static const String notifications = '/notifications';
 
   // ── Dashboard ─────────────────────────────────────────
   static const String dashboard = '/dashboard';
@@ -19,7 +20,8 @@ class ApiConstants {
 
   // ── Activity & Step Tracking ──────────────────────────
   static const String activityToday = '/activity/today';
-  static const String activityDailyStats = '/activity/stats/daily'; // hourly breakdown
+  static const String activityDailyStats =
+      '/activity/stats/daily'; // hourly breakdown
   static const String activityWeeklyStats = '/activity/stats/weekly';
   static const String activityMonthlyStats = '/activity/stats/monthly';
   static const String activityHistory = '/activity/history';
@@ -43,13 +45,16 @@ class ApiConstants {
   static const String adminUsers = '/api/admin/users';
   static const String adminAnalytics = '/api/admin/analytics';
   static const String adminReportsOverview = '/api/admin/reports/overview';
-  static const String adminNotificationsBroadcast = '/api/admin/notifications/broadcast';
-  static const String adminNotificationsSegment = '/api/admin/notifications/segment';
-  
-  static const String adminSubscriptions = '/admin/subscriptions'; // Corrected: removed /api
+  static const String adminNotificationsBroadcast =
+      '/api/admin/notifications/broadcast';
+  static const String adminNotificationsSegment =
+      '/api/admin/notifications/segment';
+
+  static const String adminSubscriptions =
+      '/admin/subscriptions'; // Corrected: removed /api
 
   static String adminUserDetail(String userId) => '/api/admin/users/$userId';
-  static String adminGrantSubscription(String userId) => 
+  static String adminGrantSubscription(String userId) =>
       '/api/admin/grantSubscription/$userId'; // New
   static String adminApproveSubscription(String subId) =>
       '/admin/subscriptions/$subId/approve'; // Corrected: removed /api
@@ -64,7 +69,7 @@ class ApiConstants {
   static const String subscriptionStatus = '/subscription/status';
   static const String subscriptionCancel = '/subscription/cancel';
   static const String subscriptionRestore = '/subscription/restore';
-  
+
   // User Subscription (alternative endpoints shown in image)
   static const String subRequest = '/subscriptions/request';
   static const String subStatus = '/subscriptions/status';

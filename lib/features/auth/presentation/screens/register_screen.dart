@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -43,7 +44,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
 
     final authProvider = context.read<AuthProvider>();
-    
+
     await authProvider.register(
       name: _nameController.text.trim(),
       email: _emailController.text.trim(),
@@ -127,8 +128,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               if (value?.isEmpty ?? true) {
                                 return 'Email is required';
                               }
-                              if (!RegExp(r'^[a-zA-Z0-9._%-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
-                                  .hasMatch(value!)) {
+                              if (!RegExp(
+                                r'^[a-zA-Z0-9._%-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+                              ).hasMatch(value!)) {
                                 return 'Enter a valid email';
                               }
                               return null;
@@ -138,14 +140,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           _buildInputField(
                             label: 'Phone Number',
                             controller: _phoneController,
-                            hint: '+1 (555) 000-0000',
-                            keyboardType: TextInputType.phone,
+                            hint: '10 digit phone number',
+                            keyboardType: TextInputType.number,
+                            maxLength: 10,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(10),
+                            ],
                             validator: (value) {
-                              if (value?.isEmpty ?? true) {
+                              final phoneNumber = value?.trim() ?? '';
+                              if (phoneNumber.isEmpty) {
                                 return 'Phone number is required';
                               }
-                              if ((value?.length ?? 0) < 10) {
-                                return 'Enter a valid phone number';
+                              if (phoneNumber.length != 10) {
+                                return 'Phone number must be 10 digits';
                               }
                               return null;
                             },
@@ -158,7 +166,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             obscureText: _obscurePassword,
                             suffixIcon: GestureDetector(
                               onTap: () => setState(
-                                  () => _obscurePassword = !_obscurePassword),
+                                () => _obscurePassword = !_obscurePassword,
+                              ),
                               child: Icon(
                                 _obscurePassword
                                     ? Icons.visibility_off
@@ -184,9 +193,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             hint: 'Re-enter your password',
                             obscureText: _obscureConfirmPassword,
                             suffixIcon: GestureDetector(
-                              onTap: () => setState(() =>
-                                  _obscureConfirmPassword =
-                                      !_obscureConfirmPassword),
+                              onTap: () => setState(
+                                () => _obscureConfirmPassword =
+                                    !_obscureConfirmPassword,
+                              ),
                               child: Icon(
                                 _obscureConfirmPassword
                                     ? Icons.visibility_off
@@ -313,6 +323,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     bool obscureText = false,
     Widget? suffixIcon,
     int? maxLength,
+    List<TextInputFormatter>? inputFormatters,
     String? Function(String?)? validator,
   }) {
     return Column(
@@ -332,6 +343,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           keyboardType: keyboardType,
           obscureText: obscureText,
           maxLength: maxLength,
+          inputFormatters: inputFormatters,
           validator: validator,
           style: GoogleFonts.poppins(
             fontSize: 14,
@@ -370,10 +382,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ),
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(
-                color: Color(0xFFE74C3C),
-                width: 1,
-              ),
+              borderSide: const BorderSide(color: Color(0xFFE74C3C), width: 1),
             ),
             suffixIcon: suffixIcon,
             counterText: '',
@@ -395,13 +404,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
           height: 24,
           child: Checkbox(
             value: _agreeToTerms,
-            onChanged: (value) => setState(() => _agreeToTerms = value ?? false),
+            onChanged: (value) =>
+                setState(() => _agreeToTerms = value ?? false),
             activeColor: const Color(0xFFFF7A00),
             checkColor: Colors.white,
-            side: BorderSide(
-              color: Colors.white.withOpacity(0.2),
-              width: 1.5,
-            ),
+            side: BorderSide(color: Colors.white.withOpacity(0.2), width: 1.5),
           ),
         ),
         const SizedBox(width: 12),
@@ -494,7 +501,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       },
     );
   }
-
 
   Widget _buildFooter() {
     return Center(

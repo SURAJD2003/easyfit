@@ -13,7 +13,6 @@ class ProfileScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final user = auth.userProfile;
-    final sub = auth.subscriptionRequest;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
@@ -28,7 +27,11 @@ class ProfileScreen extends StatelessWidget {
           ),
         ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Colors.white,
+            size: 20,
+          ),
           onPressed: () => context.pop(),
         ),
       ),
@@ -58,7 +61,10 @@ class ProfileScreen extends StatelessWidget {
                     ),
                     child: Center(
                       child: Text(
-                        (user?['name'] ?? 'U').toString().substring(0, 1).toUpperCase(),
+                        (user?['name'] ?? 'U')
+                            .toString()
+                            .substring(0, 1)
+                            .toUpperCase(),
                         style: GoogleFonts.inter(
                           fontSize: 40,
                           fontWeight: FontWeight.w800,
@@ -103,7 +109,7 @@ class ProfileScreen extends StatelessWidget {
             _buildMenuTile(
               icon: Icons.notifications_none_rounded,
               title: 'Notifications',
-              onTap: () {},
+              onTap: () => context.push(RouteNames.notifications),
             ),
             _buildMenuTile(
               icon: Icons.security_rounded,
@@ -143,7 +149,9 @@ class ProfileScreen extends StatelessWidget {
         color: const Color(0xFF141414),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: isPremium ? const Color(0xFFFF6B2B).withOpacity(0.5) : Colors.white10,
+          color: isPremium
+              ? const Color(0xFFFF6B2B).withOpacity(0.5)
+              : Colors.white10,
           width: 1.5,
         ),
       ),
@@ -164,7 +172,10 @@ class ProfileScreen extends StatelessWidget {
               ),
               if (isPremium)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFFF6B2B).withOpacity(0.2),
                     borderRadius: BorderRadius.circular(8),
@@ -182,7 +193,7 @@ class ProfileScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            isPremium 
+            isPremium
                 ? '${sub?.plan.toUpperCase() ?? 'PREMIUM'} PLAN'
                 : (isPending ? 'APPROVAL PENDING' : 'FREE PLAN'),
             style: GoogleFonts.inter(
@@ -195,18 +206,12 @@ class ProfileScreen extends StatelessWidget {
           if (isPremium && sub?.expiryDate != null)
             Text(
               'Expires on ${DateFormat('MMM dd, yyyy').format(sub!.expiryDate!)}',
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: Colors.white60,
-              ),
+              style: GoogleFonts.inter(fontSize: 13, color: Colors.white60),
             )
           else if (!isPremium && !isPending)
             Text(
               'Unlock personalized diet plans and tracking features.',
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: Colors.white60,
-              ),
+              style: GoogleFonts.inter(fontSize: 13, color: Colors.white60),
             ),
           const SizedBox(height: 20),
           if (!isPremium && !isPending)
@@ -230,14 +235,14 @@ class ProfileScreen extends StatelessWidget {
               ),
             )
           else if (isPremium)
-             Text(
-                'Enjoy your premium access!',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: const Color(0xFF30D158),
-                ),
+            Text(
+              'Enjoy your premium access!',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: const Color(0xFF30D158),
               ),
+            ),
         ],
       ),
     );
@@ -262,7 +267,11 @@ class ProfileScreen extends StatelessWidget {
             color: color,
           ),
         ),
-        trailing: Icon(Icons.chevron_right_rounded, color: Colors.white24, size: 20),
+        trailing: Icon(
+          Icons.chevron_right_rounded,
+          color: Colors.white24,
+          size: 20,
+        ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 8),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
