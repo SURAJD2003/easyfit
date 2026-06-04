@@ -40,7 +40,7 @@ class _NotificationsView extends StatelessWidget {
           onPressed: () => context.pop(),
         ),
         title: Text(
-          'Notifications',
+          'Announcements',
           style: GoogleFonts.inter(
             color: Colors.white,
             fontWeight: FontWeight.w700,
@@ -106,7 +106,7 @@ class _NotificationsView extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'No notifications yet',
+            'No announcements yet',
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(
               color: Colors.white,
@@ -116,7 +116,7 @@ class _NotificationsView extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Updates from EasyFit Clinics will appear here.',
+            'Announcements from EasyFit Clinics will appear here.',
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(color: Colors.white60, fontSize: 13),
           ),

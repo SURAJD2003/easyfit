@@ -108,7 +108,7 @@ class ProfileScreen extends StatelessWidget {
             ),
             _buildMenuTile(
               icon: Icons.notifications_none_rounded,
-              title: 'Notifications',
+              title: 'Announcements',
               onTap: () => context.push(RouteNames.notifications),
             ),
             _buildMenuTile(

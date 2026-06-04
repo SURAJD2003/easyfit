@@ -22,7 +22,7 @@ class NotificationService {
         return ApiResult.failure(
           ApiError(
             statusCode: response.statusCode,
-            message: 'Invalid notifications response',
+            message: 'Invalid announcements response',
           ),
         );
       }
@@ -65,7 +65,7 @@ class NotificationService {
             data['detail']?.toString() ??
             data['title']?.toString() ??
             data['message']?.toString() ??
-            'Failed to fetch notifications',
+            'Failed to fetch announcements',
       );
     }
 
@@ -73,7 +73,7 @@ class NotificationService {
       statusCode: statusCode,
       message: statusCode == 401
           ? 'Session expired. Please sign in again.'
-          : 'Failed to fetch notifications',
+          : 'Failed to fetch announcements',
     );
   }
 }

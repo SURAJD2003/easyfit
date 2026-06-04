@@ -4722,10 +4722,47 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             children: [
               _navItem(0, Icons.home_rounded, 'Home'),
               _navItem(1, Icons.assessment_rounded, 'Reports'), // ← Reports icon
-              const SizedBox(width: 60),
+              _easyFitLogoButton(),
               _navItem(2, Icons.bar_chart_rounded, 'Stats'),
               _navItem(3, Icons.person_rounded, 'You'),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _easyFitLogoButton() {
+    return Semantics(
+      button: true,
+      label: 'EasyFit',
+      child: GestureDetector(
+        onTap: HapticFeedback.selectionClick,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          width: 54,
+          height: 54,
+          padding: const EdgeInsets.all(5),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0A0A0A),
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: _T.accent.withValues(alpha: 0.35),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: _T.accent.withValues(alpha: 0.18),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: ClipOval(
+            child: Image.asset(
+              'assets/images/easyfit_logo.png',
+              fit: BoxFit.cover,
+            ),
           ),
         ),
       ),

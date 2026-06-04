@@ -28,7 +28,7 @@ class NotificationProvider extends ChangeNotifier {
     if (result.isSuccess) {
       _notifications = result.data ?? [];
     } else {
-      _errorMessage = result.error?.message ?? 'Failed to fetch notifications';
+      _errorMessage = result.error?.message ?? 'Failed to fetch announcements';
     }
 
     _isLoading = false;
