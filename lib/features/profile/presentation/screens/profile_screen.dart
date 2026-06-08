@@ -34,6 +34,13 @@ class ProfileScreen extends StatelessWidget {
           ),
           onPressed: () => context.pop(),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Announcements',
+            icon: const Text('🔔', style: TextStyle(fontSize: 22)),
+            onPressed: () => context.push(RouteNames.notifications),
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -105,11 +112,6 @@ class ProfileScreen extends StatelessWidget {
               icon: Icons.person_outline_rounded,
               title: 'Edit Profile',
               onTap: () => context.push(RouteNames.editProfile),
-            ),
-            _buildMenuTile(
-              icon: Icons.notifications_none_rounded,
-              title: 'Announcements',
-              onTap: () => context.push(RouteNames.notifications),
             ),
             _buildMenuTile(
               icon: Icons.security_rounded,
