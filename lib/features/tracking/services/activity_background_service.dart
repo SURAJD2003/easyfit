@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
@@ -143,7 +144,7 @@ void onStart(ServiceInstance service) async {
           // Parse the new session ID
           dynamic respData = startResp.data;
           if (respData is String) {
-            try { respData = await Future.value(respData).then((_) => startResp.data is String ? {} : startResp.data); } catch (_) {}
+            try { respData = jsonDecode(respData); } catch (_) {}
           }
           final newSessionId = (respData is Map) ? (respData['sessionId'] ?? respData['id'] ?? '') : '';
           if (newSessionId.toString().isNotEmpty) {
@@ -228,7 +229,7 @@ void onStart(ServiceInstance service) async {
   updateNotification();
 
   // Background sync loop — ONLY syncs when steps actually changed
-  syncTimer = Timer.periodic(const Duration(seconds: 15), (timer) async {
+  syncTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
     try {
       // Check midnight reset first
       await _checkMidnightReset();
@@ -316,13 +317,17 @@ void onStart(ServiceInstance service) async {
         },
       ));
       
-      await dio.post('/activity/sync', data: {
+      final syncData = {
         'sessionId': activeSessionId,
         'steps': bgSteps,
         'calories': calories,
         'distance': distance,
         'timestamp': DateTime.now().toIso8601String(),
-      });
+      };
+      
+      debugPrint('\n🚀 REALTIME JSON TO BACKEND:\n${jsonEncode(syncData)}\n');
+
+      await dio.post('/activity/sync', data: syncData);
       
       lastSyncedTotal = bgSteps;
       debugPrint('✅ BG Sync: $bgSteps steps (synced)');

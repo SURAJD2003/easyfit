@@ -1509,22 +1509,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     bool water = prefs.getBool('habit_water_$today') ?? false;
     bool walk = prefs.getBool('habit_walk_$today') ?? false;
     
-    // SAFETY: If habits are marked done but we don't actually have 1000 steps, clear them
-    // (they were set by a bug using stale API data)
-    final liveSteps = ref.read(pedometerProvider).valueOrNull ?? 0;
-    final apiSteps = ref.read(dashboardProvider).todayActivity?['steps'] ?? 0;
-    final effectiveSteps = [liveSteps, apiSteps, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
-    
-    if ((tablet || water || walk) && effectiveSteps < 1000) {
-      debugPrint('🧹 Clearing stale habit data for $today (effective steps $effectiveSteps < 1000)');
-      tablet = false;
-      water = false;
-      walk = false;
-      await prefs.remove('habit_tablet_$today');
-      await prefs.remove('habit_water_$today');
-      await prefs.remove('habit_walk_$today');
-    }
-    
+    // We removed the "stale habit data" clearer here because on app load, 
+    // the steps haven't finished loading yet (effectiveSteps is 0), 
+    // which caused the app to incorrectly uncheck habits that were already completed.
     // Also check server for cross-device sync
     try {
       final dio = ApiClient().dio;
@@ -1564,7 +1551,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     }
     
     // Auto-check habits if TOTAL daily steps >= 1000
-    // Uses effectiveSteps (max of all sources — prevents double-counting)
+    // Uses max of all sources (API, pedometer, completed) to get the true step count
+    final liveSteps = ref.read(pedometerProvider).valueOrNull ?? 0;
+    final apiSteps = ref.read(dashboardProvider).todayActivity?['steps'] ?? 0;
+    final effectiveSteps = [liveSteps, apiSteps as int, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
     if (effectiveSteps >= 1000 && !tablet && !water && !walk) {
       _autoCompleteHabits();
     }
@@ -1719,11 +1709,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           sessionResponse = await repo.startSession(0);
         } on DioException catch (e) {
           if (e.response?.statusCode == 400) {
+            debugPrint('⚠️ Local swap: startSession got 400 — retrying after delay');
+            await Future.delayed(const Duration(milliseconds: 1000));
             try {
-              await repo.stopSession(sessionId: 'force-close', finalSteps: 0, finalCalories: 0, finalDistance: 0.0);
-            } catch (_) {}
-            await Future.delayed(const Duration(milliseconds: 500));
-            sessionResponse = await repo.startSession(0);
+              sessionResponse = await repo.startSession(0);
+            } catch (_) {
+              sessionResponse = {'sessionId': 'local_${DateTime.now().millisecondsSinceEpoch}'};
+              debugPrint('⚠️ Local swap: retry failed — keeping local session');
+            }
           } else {
             rethrow;
           }
@@ -1818,66 +1811,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       // were created offline — the BG service needs notification permission)
       await Permission.notification.request();
       await Permission.activityRecognition.request();
-      if (await Permission.ignoreBatteryOptimizations.isDenied) {
-        await Permission.ignoreBatteryOptimizations.request();
-      }
+      await Permission.ignoreBatteryOptimizations.request();
       
-      // Session exists locally — validate with backend by calling startSession
-      // Backend will either resume the same session (if still valid) or
-      // abandon the stale one and return a new session ID
-      try {
-        final repo = ref.read(trackingRepositoryProvider);
-        Map<String, dynamic> sessionResponse;
-        try {
-          sessionResponse = await repo.startSession(0);
-        } on DioException catch (e) {
-          if (e.response?.statusCode == 400) {
-            // Force-close the orphan and retry
-            try {
-              await repo.stopSession(sessionId: 'force-close', finalSteps: 0, finalCalories: 0, finalDistance: 0.0);
-            } catch (_) {}
-            await Future.delayed(const Duration(milliseconds: 500));
-            sessionResponse = await repo.startSession(0);
-          } else {
-            rethrow;
-          }
-        }
-        
-        final validSessionId = sessionResponse['sessionId'] ?? sessionResponse['id'] ?? '';
-        final resumed = sessionResponse['resumed'] ?? false;
-        
-        if (validSessionId.toString().isNotEmpty) {
-          // Update local session ID (might be the same or a new one)
-          await prefs.setString('active_session_id', validSessionId.toString());
-          
-          if (!resumed) {
-            // Backend gave us a NEW session (old one was stale) — 
-            // Start a fresh session at 0. The hero card will show
-            // (_lastCompletedSteps + 0) = correct daily total
-            debugPrint('🔄 Stale session detected, got fresh session: $validSessionId');
-            await prefs.setInt('session_accumulated_steps', 0);
-            ref.read(pedometerProvider.notifier).startSession();
-            
-            // CRITICAL: Restart the BG service so it picks up the new session ID!
-            // Without this, the BG service keeps syncing to the old dead session → 404 errors
-            final service = FlutterBackgroundService();
-            service.invoke('stopService');
-            await Future.delayed(const Duration(milliseconds: 500));
-            service.startService();
-            debugPrint('🔄 Restarted BG service for new session: $validSessionId');
-          } else {
-            debugPrint('✅ Session resumed: $validSessionId');
-            // DON'T call startSession() for resumed sessions — it resets _baseSteps
-            // and _accumulatedSteps, causing the pedometer to freeze at 0.
-            // Instead, just ensure tracking is on without resetting counters.
-            ref.read(pedometerProvider.notifier).resumeSession();
-          }
-        }
-      } catch (e) {
-        debugPrint('⚠️ Session validation failed: $e — using local session');
-        // Even if server is unreachable, resume pedometer tracking locally
-        ref.read(pedometerProvider.notifier).resumeSession();
-      }
+      // ── REUSE existing session — don't create a new one! ──
+      // The session is already valid locally. Just resume pedometer tracking
+      // and ensure the background service is running.
+      debugPrint('✅ Resuming existing session: $sessionId');
+      
+      // Resume pedometer tracking locally
+      ref.read(pedometerProvider.notifier).resumeSession();
       
       // Session valid — resume tracking UI
       if (mounted) {
@@ -1912,9 +1854,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       await Permission.notification.request();
       await Permission.activityRecognition.request();
       // Request battery optimization bypass (critical for Samsung — prevents OS from killing background service)
-      if (await Permission.ignoreBatteryOptimizations.isDenied) {
-        await Permission.ignoreBatteryOptimizations.request();
-      }
+      await Permission.ignoreBatteryOptimizations.request();
 
       final prefs = await SharedPreferences.getInstance();
       final repo = ref.read(trackingRepositoryProvider);
@@ -2109,11 +2049,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             sessionResponse = await repo.startSession(0);
           } on DioException catch (e) {
             if (e.response?.statusCode == 400) {
+              // DON'T force-close with 0 — that destroys the session we just saved!
+              debugPrint('⚠️ Nav sync: startSession got 400 — retrying after delay');
+              await Future.delayed(const Duration(milliseconds: 1000));
               try {
-                await repo.stopSession(sessionId: 'force-close', finalSteps: 0, finalCalories: 0, finalDistance: 0.0);
-              } catch (_) {}
-              await Future.delayed(const Duration(milliseconds: 500));
-              sessionResponse = await repo.startSession(0);
+                sessionResponse = await repo.startSession(0);
+              } catch (_) {
+                sessionResponse = {'sessionId': 'local_${DateTime.now().millisecondsSinceEpoch}'};
+                debugPrint('⚠️ Nav sync: retry failed — using local session');
+              }
             } else {
               rethrow;
             }
@@ -2222,11 +2166,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             sessionResponse = await repo.startSession(0);
           } on DioException catch (e) {
             if (e.response?.statusCode == 400) {
+              // Backend says a session already exists. DON'T force-close with 0!
+              // That would overwrite the session we just properly stopped.
+              // Wait longer and retry — the stop should process by then.
+              debugPrint('⚠️ Tab sync: startSession got 400 — retrying after delay');
+              await Future.delayed(const Duration(milliseconds: 1000));
               try {
-                await repo.stopSession(sessionId: 'force-close', finalSteps: 0, finalCalories: 0, finalDistance: 0.0);
-              } catch (_) {}
-              await Future.delayed(const Duration(milliseconds: 500));
-              sessionResponse = await repo.startSession(0);
+                sessionResponse = await repo.startSession(0);
+              } catch (_) {
+                sessionResponse = {'sessionId': 'local_${DateTime.now().millisecondsSinceEpoch}'};
+                debugPrint('⚠️ Tab sync: retry failed — using local session');
+              }
             } else {
               rethrow;
             }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../../../core/api_client.dart';
@@ -79,13 +80,17 @@ class ActivityRemoteDatasource {
   //   201 = new session created
   //   200 = resumed existing session (still fresh)
   Future<Map<String, dynamic>> startSession(int baselineSteps) async {
-    final response = await _dio.post(
-      ApiConstants.activitySessionStart,
-      data: {
+      final startData = {
         'startTime': DateTime.now().toIso8601String(),
         'baselineSteps': baselineSteps,
-      },
-    );
+      };
+      
+      print('\n🚀 REALTIME START SESSION JSON:\n${jsonEncode(startData)}\n');
+
+      final response = await _dio.post(
+        ApiConstants.activitySessionStart,
+        data: startData,
+      );
     final parsed = _parseResponse(response.data);
     // Include HTTP status so caller knows if session was resumed (200) or new (201)
     parsed['_httpStatus'] = response.statusCode;
@@ -99,16 +104,20 @@ class ActivityRemoteDatasource {
     required int finalCalories,
     required double finalDistance,
   }) async {
-    final response = await _dio.patch(
-      ApiConstants.activitySessionStop,
-      data: {
+      final stopData = {
         'sessionId': sessionId,
         'endTime': DateTime.now().toIso8601String(),
         'finalSteps': finalSteps,
         'finalCalories': finalCalories,
         'finalDistance': finalDistance,
-      },
-    );
+      };
+      
+      print('\n🚀 REALTIME STOP SESSION JSON:\n${jsonEncode(stopData)}\n');
+
+      final response = await _dio.patch(
+        ApiConstants.activitySessionStop,
+        data: stopData,
+      );
     return _parseResponse(response.data);
   }
 
