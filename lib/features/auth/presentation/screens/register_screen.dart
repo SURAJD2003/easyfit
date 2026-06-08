@@ -106,7 +106,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           _buildInputField(
                             label: 'Full Name',
                             controller: _nameController,
-                            hint: 'John Doe',
+                            hint: 'Your full name',
                             keyboardType: TextInputType.name,
                             validator: (value) {
                               if (value?.isEmpty ?? true) {

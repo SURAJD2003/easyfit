@@ -3599,6 +3599,44 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           ),
 
           GestureDetector(
+            onTap: () => context.push(RouteNames.notifications),
+            child: Container(
+              width: 44, height: 44,
+              decoration: BoxDecoration(
+                color: _T.card2,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _T.divider.withOpacity(0.8)),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 8, offset: const Offset(0, 2)),
+                ],
+              ),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Center(
+                    child: Text('🔔', style: TextStyle(fontSize: 20)),
+                  ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF6B2B),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(color: const Color(0xFFFF6B2B).withOpacity(0.55), blurRadius: 6, spreadRadius: 1),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          GestureDetector(
             onTap: _openProfile,
             child: Container(
               width: 38, height: 38,
