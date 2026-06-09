@@ -69,6 +69,26 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
     }
   }
 
+  Future<void> _showAdminSnackBar(String message) async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        content: Text(
+          message,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        backgroundColor: const Color(0xFF121212),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   Future<void> _handleDeactivate() async {
     final reasonController = TextEditingController();
     final result = await showDialog<String>(
@@ -120,10 +140,13 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
     );
 
     if (result != null && mounted) {
-      await context.read<AdminProvider>().deactivateUser(
+      final success = await context.read<AdminProvider>().deactivateUser(
             userId: widget.userId,
             reason: result.trim(),
           );
+      if (success) {
+        await _showAdminSnackBar('Account deactivated successfully.');
+      }
     }
   }
 
@@ -365,11 +388,14 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
                         icon: user.isActive ? Icons.block_flipped : Icons.check_circle_rounded,
                         color: user.isActive ? Colors.redAccent : const Color(0xFF10B981),
                         isLoading: state.isActionLoading,
-                        onTap: () {
+                        onTap: () async {
                           if (user.isActive) {
-                            _handleDeactivate();
+                            await _handleDeactivate();
                           } else {
-                            provider.activateUser(userId: widget.userId);
+                            final success = await provider.activateUser(userId: widget.userId);
+                            if (success) {
+                              await _showAdminSnackBar('Account activated successfully.');
+                            }
                           }
                         },
                       ),
