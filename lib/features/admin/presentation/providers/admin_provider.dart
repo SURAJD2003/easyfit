@@ -348,10 +348,15 @@ class AdminProvider extends ChangeNotifier {
       final users = await GetAllUsersUseCase(
         repository: _buildRepo(),
       ).call();
-      _usersState = _usersState.copyWith(users: users, isLoading: false);
+      _usersState = _usersState.copyWith(
+        users: users,
+        isLoading: false,
+        isActionLoading: false,
+      );
     } catch (e) {
       _usersState = _usersState.copyWith(
         isLoading: false,
+        isActionLoading: false,
         error: _parseError(e),
       );
     }
@@ -414,6 +419,9 @@ class AdminProvider extends ChangeNotifier {
       await ActivateUserUseCase(repository: _buildRepo())
           .call(userId: userId);
       await fetchAllUsers();
+      await fetchUserDetail(userId: userId);
+      _usersState = _usersState.copyWith(isActionLoading: false);
+      notifyListeners();
       return true;
     } catch (e) {
       _usersState = _usersState.copyWith(
@@ -433,6 +441,9 @@ class AdminProvider extends ChangeNotifier {
       await DeactivateUserUseCase(repository: _buildRepo())
           .call(userId: userId, reason: reason);
       await fetchAllUsers();
+      await fetchUserDetail(userId: userId);
+      _usersState = _usersState.copyWith(isActionLoading: false);
+      notifyListeners();
       return true;
     } catch (e) {
       _usersState = _usersState.copyWith(
