@@ -10,6 +10,7 @@ class SubscriptionModel extends SubscriptionEntity {
     required super.status,
     super.requestedAt,
     super.resolvedAt,
+    super.expiryDate,
     super.note,
     super.reason,
   });
@@ -27,6 +28,9 @@ class SubscriptionModel extends SubscriptionEntity {
           : null,
       resolvedAt: json['resolvedAt'] != null
           ? DateTime.tryParse(json['resolvedAt'].toString())
+          : null,
+      expiryDate: json['expiryDate'] != null
+          ? DateTime.tryParse(json['expiryDate'].toString())
           : null,
       note: json['note']?.toString(),
       reason: json['reason']?.toString(),

@@ -11,7 +11,7 @@ class ApiClient {
 
   ApiClient._internal() {
     dio = Dio(BaseOptions(
-      baseUrl: 'https://api.theeasyfitclinics.com/api',
+      baseUrl: 'https://uat-api.theeasyfitclinics.com/api',
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 15),
       headers: {
@@ -35,7 +35,7 @@ class ApiClient {
 
             if (refreshToken != null && refreshToken.isNotEmpty) {
               final refreshDio = Dio(BaseOptions(
-                baseUrl: 'https://api.theeasyfitclinics.com/api',
+                baseUrl: 'https://uat-api.theeasyfitclinics.com/api',
                 headers: {
                   'Content-Type': 'application/json',
                   'Accept': 'application/json',

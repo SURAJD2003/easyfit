@@ -7,6 +7,7 @@ class SubscriptionEntity {
   final String status;     
   final DateTime? requestedAt;
   final DateTime? resolvedAt;
+  final DateTime? expiryDate;
   final String? note;
   final String? reason;
 
@@ -19,6 +20,7 @@ class SubscriptionEntity {
     required this.status,
     this.requestedAt,
     this.resolvedAt,
+    this.expiryDate,
     this.note,
     this.reason,
   });

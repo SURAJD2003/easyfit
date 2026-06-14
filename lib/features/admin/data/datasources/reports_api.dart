@@ -6,7 +6,7 @@ class ReportsApi {
   final http.Client client;
   final String baseUrl;
 
-  ReportsApi({http.Client? client, this.baseUrl = 'https://api.theeasyfitclinics.com'})
+  ReportsApi({http.Client? client, this.baseUrl = 'https://uat-api.theeasyfitclinics.com'})
       : client = client ?? http.Client();
 
   Map<String, String> _headers(String token) => {

@@ -2,11 +2,13 @@ class SubscriptionInfo {
   final String plan;
   final String status;
   final DateTime? expiryDate;
+  final DateTime? lastRenewalDate;
 
   const SubscriptionInfo({
     required this.plan,
     required this.status,
     this.expiryDate,
+    this.lastRenewalDate,
   });
 }
 
@@ -20,6 +22,7 @@ class AdminUserEntity {
   final String? profileImage;
   final DateTime? createdAt;
   final SubscriptionInfo? subscription;
+  final String status;
 
   const AdminUserEntity({
     required this.id,
@@ -27,6 +30,7 @@ class AdminUserEntity {
     required this.email,
     this.phone,
     required this.isActive,
+    required this.status,
     this.subscriptionPlan,
     this.profileImage,
     this.createdAt,

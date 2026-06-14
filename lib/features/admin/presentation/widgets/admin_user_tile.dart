@@ -73,9 +73,7 @@ class AdminUserTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            StatusBadge(
-              type: user.isActive ? BadgeType.active : BadgeType.inactive,
-            ),
+            StatusBadge.fromString(user.status),
             const SizedBox(width: 8),
             Icon(
               Icons.chevron_right,

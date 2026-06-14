@@ -1,5 +1,9 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/datasources/admin_remote_datasource.dart';
@@ -104,6 +108,7 @@ class SubscriptionsState {
   final bool isActionLoading;
   final String? error;
   final String filterStatus;
+  final String searchQuery;
 
   const SubscriptionsState({
     this.subscriptions = const [],
@@ -112,11 +117,23 @@ class SubscriptionsState {
     this.isActionLoading = false,
     this.error,
     this.filterStatus = 'all',
+    this.searchQuery = '',
   });
 
   List<SubscriptionEntity> get filteredSubscriptions {
-    if (filterStatus == 'all') return subscriptions;
-    return subscriptions.where((s) => s.status == filterStatus).toList();
+    var filtered = subscriptions;
+    if (filterStatus != 'all') {
+      filtered = filtered.where((s) => s.status == filterStatus).toList();
+    }
+    if (searchQuery.isNotEmpty) {
+      final query = searchQuery.toLowerCase();
+      filtered = filtered.where((s) {
+        final nameMatches = s.userName.toLowerCase().contains(query);
+        final emailMatches = s.userEmail.toLowerCase().contains(query);
+        return nameMatches || emailMatches;
+      }).toList();
+    }
+    return filtered;
   }
 
   SubscriptionsState copyWith({
@@ -126,6 +143,7 @@ class SubscriptionsState {
     bool? isActionLoading,
     String? error,
     String? filterStatus,
+    String? searchQuery,
     bool clearSelectedSub = false,
     bool clearError = false,
   }) {
@@ -138,6 +156,7 @@ class SubscriptionsState {
       isActionLoading: isActionLoading ?? this.isActionLoading,
       error: clearError ? null : error ?? this.error,
       filterStatus: filterStatus ?? this.filterStatus,
+      searchQuery: searchQuery ?? this.searchQuery,
     );
   }
 }
@@ -294,6 +313,17 @@ class AdminProvider extends ChangeNotifier {
         isLoading: false,
         error: null,
       );
+      
+      // Stop activity tracking service if running
+      try {
+        final service = FlutterBackgroundService();
+        if (await service.isRunning()) {
+          service.invoke('stopService');
+        }
+      } catch (e) {
+        debugPrint('Failed to stop background service: $e');
+      }
+      
       notifyListeners();
       return true;
     } catch (e) {
@@ -318,6 +348,17 @@ class AdminProvider extends ChangeNotifier {
         adminEmail: prefs.getString('admin_email'),
         isLoggedIn: true,
       );
+      
+      // Stop activity tracking service if running
+      try {
+        final service = FlutterBackgroundService();
+        if (await service.isRunning()) {
+          service.invoke('stopService');
+        }
+      } catch (e) {
+        debugPrint('Failed to stop background service: $e');
+      }
+      
       notifyListeners();
     }
   }
@@ -610,6 +651,12 @@ class AdminProvider extends ChangeNotifier {
   void filterSubscriptions(String status) {
     _subscriptionsState =
         _subscriptionsState.copyWith(filterStatus: status);
+    notifyListeners();
+  }
+
+  void searchSubscriptions(String query) {
+    _subscriptionsState =
+        _subscriptionsState.copyWith(searchQuery: query);
     notifyListeners();
   }
 

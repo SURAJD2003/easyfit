@@ -7,7 +7,6 @@ import 'admin_dashboard_screen.dart';
 import 'admin_users_screen.dart';
 import 'admin_subscriptions_screen.dart';
 import 'admin_notifications_screen.dart';
-import 'admin_reports_screen.dart';
 
 class AdminMainScreen extends StatefulWidget {
   static final GlobalKey<ScaffoldState> scaffoldKey = GlobalKey<ScaffoldState>();
@@ -29,7 +28,6 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
     AdminUsersScreen(),
     AdminSubscriptionsScreen(),
     AdminNotificationsScreen(),
-    AdminReportsScreen(),
   ];
 
   @override
@@ -98,7 +96,7 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
                 Navigator.pop(context);
                 await provider.logout();
                 if (mounted) {
-                  context.go(RouteNames.adminLogin);
+                  context.go(RouteNames.login);
                 }
               },
             ),
@@ -155,13 +153,6 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
               icon: Icons.notifications_none_rounded,
               label: 'Notifications',
               index: 3,
-              currentIndex: _currentIndex,
-              onTap: (i) => setState(() => _currentIndex = i),
-            ),
-            _NavItem(
-              icon: Icons.bar_chart_rounded,
-              label: 'Reports',
-              index: 4,
               currentIndex: _currentIndex,
               onTap: (i) => setState(() => _currentIndex = i),
             ),

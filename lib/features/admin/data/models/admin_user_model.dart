@@ -11,6 +11,7 @@ class AdminUserModel extends AdminUserEntity {
     super.profileImage,
     super.createdAt,
     super.subscription,
+    required super.status,
   });
 
   factory AdminUserModel.fromJson(Map<String, dynamic> json) {
@@ -26,6 +27,11 @@ class AdminUserModel extends AdminUserEntity {
         expiryDate: subJson['expiryDate'] != null
             ? DateTime.tryParse(subJson['expiryDate'].toString())
             : null,
+        lastRenewalDate: subJson['lastRenewalDate'] != null
+            ? DateTime.tryParse(subJson['lastRenewalDate'].toString())
+            : subJson['updatedAt'] != null
+                ? DateTime.tryParse(subJson['updatedAt'].toString())
+                : null,
       );
     }
 
@@ -43,6 +49,7 @@ class AdminUserModel extends AdminUserEntity {
               ? DateTime.tryParse(json['createdAt'].toString())
               : null,
       subscription: subInfo,
+      status: status.isNotEmpty ? status : (isActive ? 'active' : 'inactive'),
     );
   }
 
@@ -53,6 +60,7 @@ class AdminUserModel extends AdminUserEntity {
       'email': email,
       'phone': phone,
       'isActive': isActive,
+      'status': status,
       'subscriptionPlan': subscriptionPlan,
       'profileImage': profileImage,
     };

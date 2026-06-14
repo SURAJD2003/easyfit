@@ -6,12 +6,14 @@ class SubscriptionCard extends StatelessWidget {
   final SubscriptionEntity subscription;
   final VoidCallback? onApprove;
   final VoidCallback? onReject;
+  final VoidCallback? onTap;
 
   const SubscriptionCard({
     super.key,
     required this.subscription,
     this.onApprove,
     this.onReject,
+    this.onTap,
   });
 
   static const Color _cardColor = Color(0xFF1A1A1A);
@@ -19,9 +21,11 @@ class SubscriptionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: _cardColor,
         borderRadius: BorderRadius.circular(16),
@@ -79,7 +83,15 @@ class SubscriptionCard extends StatelessWidget {
                       : 'N/A',
                 ),
               ),
-              if (subscription.resolvedAt != null) ...[
+              if (subscription.status == 'approved' && subscription.expiryDate != null) ...[
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _InfoChip(
+                    label: 'Due Date',
+                    value: _formatDate(subscription.expiryDate!),
+                  ),
+                ),
+              ] else if (subscription.resolvedAt != null) ...[
                 const SizedBox(width: 12),
                 Expanded(
                   child: _InfoChip(
@@ -147,7 +159,7 @@ class SubscriptionCard extends StatelessWidget {
             ),
         ],
       ),
-    );
+    ));
   }
 
   String _formatDate(DateTime date) {
