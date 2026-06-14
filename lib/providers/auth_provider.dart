@@ -115,7 +115,7 @@ class AuthProvider extends ChangeNotifier {
 
       // 2. Fetch plural status (manual approval)
       try {
-        final responsePlural = await dio.get('https://api.theeasyfitclinics.com/subscriptions/status');
+        final responsePlural = await dio.get('https://uat-api.theeasyfitclinics.com/subscriptions/status');
         if (responsePlural.statusCode == 200) {
           final data = responsePlural.data;
           print('DEBUG PLURAL STATUS: $data');

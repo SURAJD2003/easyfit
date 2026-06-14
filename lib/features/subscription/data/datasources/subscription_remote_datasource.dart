@@ -13,7 +13,7 @@ class SubscriptionRemoteDataSource {
 
   SubscriptionRemoteDataSource() {
     _baseDio = Dio(BaseOptions(
-      baseUrl: ApiConstants.adminBaseUrl, // https://api.theeasyfitclinics.com
+      baseUrl: ApiConstants.adminBaseUrl, // https://uat-api.theeasyfitclinics.com
       headers: _dio.options.headers,
     ));
     

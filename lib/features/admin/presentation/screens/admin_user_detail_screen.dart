@@ -239,9 +239,7 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      StatusBadge(
-                        type: user.isActive ? BadgeType.active : BadgeType.inactive,
-                      ),
+                      StatusBadge.fromString(user.status),
                     ],
                   ),
                 ),
@@ -271,6 +269,12 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
                       label: 'Joined On',
                       value: DateFormat('MMM dd, yyyy').format(user.createdAt!),
                     ),
+                  if (user.subscription?.lastRenewalDate != null)
+                    _InfoRow(
+                      icon: Icons.update_rounded,
+                      label: 'Last Renewed',
+                      value: DateFormat('MMM dd, yyyy').format(user.subscription!.lastRenewalDate!),
+                    ),
                 ]),
                 const SizedBox(height: 32),
 
@@ -295,12 +299,11 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
                 // ── ACTIONS ──
                 Row(
                   children: [
-                    if (user.subscription?.plan.toLowerCase() == 'free' || user.subscription == null)
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.only(right: 12),
-                          child: _ActionButton(
-                            label: 'Grant Premium',
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: _ActionButton(
+                          label: 'Update / Renew Plan',
                             icon: Icons.workspace_premium_rounded,
                             color: const Color(0xFFFF6B00),
                             isLoading: state.isActionLoading,
@@ -310,72 +313,176 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
                               
                               final plan = await showDialog<String>(
                                 context: context,
-                                builder: (context) => SimpleDialog(
-                                  backgroundColor: _cardColor,
-                                  title: const Text('Select Plan to Grant', style: TextStyle(color: Colors.white)),
-                                  children: [
-                                    SimpleDialogOption(
-                                      onPressed: () => Navigator.pop(context, 'plan-monthly'),
-                                      child: const Text('Monthly Plan', style: TextStyle(color: Colors.white70)),
+                                builder: (context) => Dialog(
+                                  backgroundColor: Colors.transparent,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(24),
+                                    decoration: BoxDecoration(
+                                      color: _cardColor,
+                                      borderRadius: BorderRadius.circular(24),
+                                      border: Border.all(color: Colors.white.withOpacity(0.08)),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.5),
+                                          blurRadius: 30,
+                                          offset: const Offset(0, 10),
+                                        ),
+                                      ],
                                     ),
-                                    SimpleDialogOption(
-                                      onPressed: () => Navigator.pop(context, 'plan-yearly'),
-                                      child: const Text('Yearly Plan', style: TextStyle(color: Colors.white70)),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'Update Subscription',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 20,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        const Text(
+                                          'Select the plan you want to apply to this user.',
+                                          style: TextStyle(
+                                            color: Colors.white54,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 24),
+                                        _PlanSelectionTile(
+                                          title: 'Monthly Plan',
+                                          icon: Icons.calendar_month_rounded,
+                                          onTap: () => Navigator.pop(context, 'plan-monthly'),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        _PlanSelectionTile(
+                                          title: 'Yearly Plan',
+                                          icon: Icons.workspace_premium_rounded,
+                                          onTap: () => Navigator.pop(context, 'plan-yearly'),
+                                        ),
+                                      ],
                                     ),
-                                  ],
+                                  ),
                                 ),
                               );
 
                               if (plan != null && mounted) {
+                                final now = DateTime.now();
+                                final expiry = plan == 'plan-yearly'
+                                    ? DateTime(now.year + 1, now.month, now.day)
+                                    : DateTime(now.year, now.month + 1, now.day);
+                                final defaultDateStr = "${expiry.year}-${expiry.month.toString().padLeft(2, '0')}-${expiry.day.toString().padLeft(2, '0')}";
+                                selectedDate = defaultDateStr;
+
                                 // Step 2: Ask for Expiry Date and Reason
                                 final details = await showDialog<Map<String, String>>(
                                   context: context,
-                                  builder: (context) => AlertDialog(
-                                    backgroundColor: _cardColor,
-                                    title: const Text('Grant Details', style: TextStyle(color: Colors.white)),
-                                    content: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        TextField(
-                                          controller: TextEditingController(text: '2026-06-01'), // Default for testing
-                                          style: const TextStyle(color: Colors.white),
-                                          decoration: const InputDecoration(
-                                            labelText: 'Expiry Date (YYYY-MM-DD)',
-                                            labelStyle: TextStyle(color: Colors.white38),
-                                          ),
-                                          onChanged: (val) => selectedDate = val,
-                                        ),
-                                        const SizedBox(height: 12),
-                                        TextField(
-                                          controller: reasonController,
-                                          style: const TextStyle(color: Colors.white),
-                                          decoration: const InputDecoration(
-                                            labelText: 'Reason',
-                                            labelStyle: TextStyle(color: Colors.white38),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    actions: [
-                                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(context, {
-                                          'date': selectedDate ?? '2026-06-01',
-                                          'reason': reasonController.text
-                                        }), 
-                                        child: const Text('Grant')
+                                  builder: (context) => Dialog(
+                                    backgroundColor: Colors.transparent,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(24),
+                                      decoration: BoxDecoration(
+                                        color: _cardColor,
+                                        borderRadius: BorderRadius.circular(24),
+                                        border: Border.all(color: Colors.white.withOpacity(0.08)),
                                       ),
-                                    ],
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            'Subscription Details',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 24),
+                                          TextField(
+                                            controller: TextEditingController(text: defaultDateStr),
+                                            style: const TextStyle(color: Colors.white),
+                                            decoration: InputDecoration(
+                                              labelText: 'Expiry Date',
+                                              labelStyle: const TextStyle(color: Colors.white54),
+                                              hintText: 'YYYY-MM-DD',
+                                              hintStyle: const TextStyle(color: Colors.white24),
+                                              filled: true,
+                                              fillColor: Colors.black26,
+                                              border: OutlineInputBorder(
+                                                borderRadius: BorderRadius.circular(12),
+                                                borderSide: BorderSide.none,
+                                              ),
+                                              prefixIcon: const Icon(Icons.date_range_rounded, color: Colors.white38),
+                                            ),
+                                            onChanged: (val) => selectedDate = val,
+                                          ),
+                                          const SizedBox(height: 16),
+                                          TextField(
+                                            controller: reasonController,
+                                            style: const TextStyle(color: Colors.white),
+                                            decoration: InputDecoration(
+                                              labelText: 'Reason for Update',
+                                              labelStyle: const TextStyle(color: Colors.white54),
+                                              filled: true,
+                                              fillColor: Colors.black26,
+                                              border: OutlineInputBorder(
+                                                borderRadius: BorderRadius.circular(12),
+                                                borderSide: BorderSide.none,
+                                              ),
+                                              prefixIcon: const Icon(Icons.edit_note_rounded, color: Colors.white38),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 32),
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: TextButton(
+                                                  onPressed: () => Navigator.pop(context),
+                                                  style: TextButton.styleFrom(
+                                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                                  ),
+                                                  child: const Text('Cancel', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w600)),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: ElevatedButton(
+                                                  onPressed: () => Navigator.pop(context, {
+                                                    'date': selectedDate ?? defaultDateStr,
+                                                    'reason': reasonController.text
+                                                  }),
+                                                  style: ElevatedButton.styleFrom(
+                                                    backgroundColor: const Color(0xFFFF6B00),
+                                                    foregroundColor: Colors.white,
+                                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                                    elevation: 0,
+                                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                                  ),
+                                                  child: const Text('Update', style: TextStyle(fontWeight: FontWeight.w700)),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
                                 );
 
                                 if (details != null && mounted) {
-                                  provider.grantSubscription(
+                                  await provider.grantSubscription(
                                     userId: widget.userId, 
                                     planId: plan,
                                     expiryDate: details['date'],
                                     reason: details['reason'],
                                   );
+                                  if (mounted) {
+                                    provider.fetchUserDetail(userId: widget.userId);
+                                    provider.fetchSubscriptions();
+                                  }
                                 }
                               }
                             },
@@ -605,6 +712,57 @@ class _ActionButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 14),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlanSelectionTile extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _PlanSelectionTile({
+    super.key,
+    required this.title,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.03),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withOpacity(0.05)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B00).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: const Color(0xFFFF6B00), size: 22),
+            ),
+            const SizedBox(width: 16),
+            Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const Spacer(),
+            Icon(Icons.chevron_right_rounded, color: Colors.white.withOpacity(0.3)),
+          ],
         ),
       ),
     );

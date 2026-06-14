@@ -119,9 +119,5 @@ final appRouter = GoRouter(
       path: RouteNames.adminNotifications,
       builder: (context, state) => const AdminNotificationsScreen(),
     ),
-    GoRoute(
-      path: RouteNames.adminReports,
-      builder: (context, state) => const AdminReportsScreen(),
-    ),
   ],
 );

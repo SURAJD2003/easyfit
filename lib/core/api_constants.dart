@@ -1,6 +1,6 @@
 class ApiConstants {
-  static const String baseUrl = 'https://api.theeasyfitclinics.com/api';
-  static const String adminBaseUrl = 'https://api.theeasyfitclinics.com';
+  static const String baseUrl = 'https://uat-api.theeasyfitclinics.com/api';
+  static const String adminBaseUrl = 'https://uat-api.theeasyfitclinics.com';
 
   // ── Auth ─────────────────────────────────────────────
   static const String register = '/auth/register';

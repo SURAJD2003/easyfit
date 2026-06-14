@@ -116,7 +116,7 @@ void onStart(ServiceInstance service) async {
       if (totalSteps > 0 && currentSessionId.isNotEmpty && token.isNotEmpty) {
         try {
           final dio = Dio(BaseOptions(
-            baseUrl: 'https://api.theeasyfitclinics.com/api',
+            baseUrl: 'https://uat-api.theeasyfitclinics.com/api',
             headers: {
               'Content-Type': 'application/json',
               'Accept': 'application/json',
@@ -256,7 +256,7 @@ void onStart(ServiceInstance service) async {
         debugPrint('📴 BG: Local session detected, attempting to get real session...');
         try {
           final dio = Dio(BaseOptions(
-            baseUrl: 'https://api.theeasyfitclinics.com/api',
+            baseUrl: 'https://uat-api.theeasyfitclinics.com/api',
             headers: {
               'Content-Type': 'application/json',
               'Accept': 'application/json',
@@ -308,7 +308,7 @@ void onStart(ServiceInstance service) async {
       final distance = double.parse((bgSteps * 0.000762).toStringAsFixed(3));
       
       final dio = Dio(BaseOptions(
-        baseUrl: 'https://api.theeasyfitclinics.com/api',
+        baseUrl: 'https://uat-api.theeasyfitclinics.com/api',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',

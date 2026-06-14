@@ -7,6 +7,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/router/route_names.dart';
 import 'package:provider/provider.dart';
 import '../../../../providers/auth_provider.dart';
+import '../../../admin/presentation/providers/admin_provider.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -115,12 +116,23 @@ class _SplashScreenState extends State<SplashScreen>
     // Explicitly await the auth check from SharedPreferences  
     final auth = Provider.of<AuthProvider>(context, listen: false);
     await auth.checkAuthStatus();
+    
+    // Check admin auth status
+    final adminAuth = Provider.of<AdminProvider>(context, listen: false);
+    await adminAuth.loadSavedSession();
+
     // Fetch fresh profile and subscription status from server
     await auth.fetchProfile();
     await auth.fetchSubscriptionStatus();
     
     if (!mounted) return;
     
+    // Redirect to admin dashboard if admin is logged in
+    if (adminAuth.authState.isLoggedIn) {
+      context.go(RouteNames.adminDashboard);
+      return;
+    }
+
     if (auth.isAuthenticated) {
       if (auth.isApproved) {
         context.go(RouteNames.dashboard);

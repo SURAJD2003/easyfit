@@ -118,8 +118,11 @@ class PaywallScreen extends ConsumerWidget {
   }
 
   Widget _buildPlansList(List<SubscriptionPlanModel> plans) {
+    // Only show Free plan for now per client request
+    final freePlans = plans.where((p) => p.price == 0 || p.planId.toLowerCase().contains('free')).toList();
+    
     return Column(
-      children: plans.map((plan) => _PlanCard(plan: plan)).toList(),
+      children: freePlans.map((plan) => _PlanCard(plan: plan)).toList(),
     );
   }
 
