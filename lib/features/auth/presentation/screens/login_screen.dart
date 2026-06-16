@@ -131,68 +131,97 @@ class _LoginScreenState extends State<LoginScreen> {
   // ────────────────────────────────────────────────────────────────
 
   Widget _buildHeaderSection(Size size) {
-    return Stack(
-      children: [
-        // Background image
-        Image.asset(
-          'assets/images/runner.png',
-          height: size.height * 0.28,
-          width: double.infinity,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return Container(
-              height: size.height * 0.28,
-              color: const Color(0xFF1A1A1A),
-            );
-          },
-        ),
-
-        // Dark overlay
-        Container(
-          height: size.height * 0.28,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                const Color(0xFF0D0D0D).withOpacity(0.3),
-                const Color(0xFF0D0D0D).withOpacity(0.8),
-              ],
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.only(top: 60, bottom: 20),
+      child: Stack(
+        alignment: Alignment.topCenter,
+        clipBehavior: Clip.none,
+        children: [
+          // Ambient Glow Top Right
+          Positioned(
+            top: -100,
+            right: -100,
+            child: Container(
+              width: 250,
+              height: 250,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFFFF7A00).withOpacity(0.15),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFFF7A00).withOpacity(0.2),
+                    blurRadius: 100,
+                    spreadRadius: 50,
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-
-        // Title and subtitle
-        Positioned(
-          bottom: 20,
-          left: 24,
-          right: 24,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          // Ambient Glow Top Left
+          Positioned(
+            top: -50,
+            left: -150,
+            child: Container(
+              width: 200,
+              height: 200,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFFFF7A00).withOpacity(0.08),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFFF7A00).withOpacity(0.1),
+                    blurRadius: 100,
+                    spreadRadius: 30,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          
+          Column(
             children: [
+              // Logo
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFFFF7A00), width: 3),
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.fitness_center,
+                    color: Color(0xFFFF7A00),
+                    size: 40,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // Title and subtitle
               Text(
                 'Welcome Back',
-                style: GoogleFonts.playfairDisplay(
-                  fontSize: 36,
-                  fontWeight: FontWeight.w600,
+                style: GoogleFonts.poppins(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w700,
                   color: Colors.white,
-                  height: 1.2,
+                  letterSpacing: 0.5,
                 ),
               ),
               const SizedBox(height: 8),
               Text(
                 'Sign in to continue your fitness journey',
                 style: GoogleFonts.poppins(
-                  fontSize: 13,
+                  fontSize: 14,
                   fontWeight: FontWeight.w400,
-                  color: Colors.white70,
-                  height: 1.5,
+                  color: Colors.white54,
                 ),
               ),
             ],
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -204,6 +233,7 @@ class _LoginScreenState extends State<LoginScreen> {
           controller: _emailController,
           hint: 'your@email.com',
           keyboardType: TextInputType.emailAddress,
+          prefixIcon: const Icon(Icons.email_outlined, color: Color(0xFFFF7A00)),
           validator: (value) {
             if (value?.isEmpty ?? true) return 'Email is required';
             if (!RegExp(
@@ -214,17 +244,18 @@ class _LoginScreenState extends State<LoginScreen> {
             return null;
           },
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         _buildInputField(
           label: 'Password',
           controller: _passwordController,
           hint: 'Your password',
           obscureText: _obscurePassword,
+          prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFFFF7A00)),
           suffixIcon: GestureDetector(
             onTap: () => setState(() => _obscurePassword = !_obscurePassword),
             child: Icon(
               _obscurePassword ? Icons.visibility_off : Icons.visibility,
-              color: Colors.white54,
+              color: const Color(0xFFFF7A00),
               size: 20,
             ),
           ),
@@ -235,7 +266,7 @@ class _LoginScreenState extends State<LoginScreen> {
             return null;
           },
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         Align(
           alignment: Alignment.centerRight,
           child: GestureDetector(
@@ -243,7 +274,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Text(
               'Forgot password?',
               style: GoogleFonts.poppins(
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: FontWeight.w500,
                 color: const Color(0xFFFF7A00),
               ),
@@ -260,6 +291,7 @@ class _LoginScreenState extends State<LoginScreen> {
     String? hint,
     TextInputType keyboardType = TextInputType.text,
     bool obscureText = false,
+    Widget? prefixIcon,
     Widget? suffixIcon,
     int? maxLength,
     String? Function(String?)? validator,
@@ -295,37 +327,29 @@ class _LoginScreenState extends State<LoginScreen> {
               color: Colors.white38,
             ),
             filled: true,
-            fillColor: const Color(0xFF1A1A1A),
+            fillColor: const Color(0xFF161616), // Darker grey fill
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(
-                color: Colors.white.withOpacity(0.1),
-                width: 1,
-              ),
+              borderSide: const BorderSide(color: Color(0xFF222222), width: 1),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(
-                color: Colors.white.withOpacity(0.1),
-                width: 1,
-              ),
+              borderSide: const BorderSide(color: Color(0xFF222222), width: 1),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(
-                color: Color(0xFFFF7A00),
-                width: 1.5,
-              ),
+              borderSide: const BorderSide(color: Color(0xFFFF7A00), width: 1.2),
             ),
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: const BorderSide(color: Color(0xFFE74C3C), width: 1),
             ),
+            prefixIcon: prefixIcon,
             suffixIcon: suffixIcon,
             counterText: '',
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 16,
-              vertical: 12,
+              vertical: 16,
             ),
           ),
         ),
@@ -405,18 +429,53 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Widget _buildAdminLoginLink() {
-    return Center(
-      child: GestureDetector(
-        onTap: () => context.go(RouteNames.adminLogin),
-        child: Text(
-          'Admin Login',
-          style: GoogleFonts.poppins(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: const Color(0xFFFF7A00),
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(child: Divider(color: Colors.white.withOpacity(0.1))),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'OR',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w400,
+                  color: Colors.white54,
+                ),
+              ),
+            ),
+            Expanded(child: Divider(color: Colors.white.withOpacity(0.1))),
+          ],
+        ),
+        const SizedBox(height: 24),
+        SizedBox(
+          width: 200,
+          height: 48,
+          child: OutlinedButton.icon(
+            onPressed: () => context.go(RouteNames.adminLogin),
+            icon: const Icon(
+              Icons.admin_panel_settings_outlined,
+              color: Color(0xFFFF7A00),
+              size: 20,
+            ),
+            label: Text(
+              'Admin Login',
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: const Color(0xFFFF7A00),
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Color(0xFFFF7A00), width: 1),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
 }

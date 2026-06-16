@@ -19,12 +19,12 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen>
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
 
-  final List<String> _statuses = ['all', 'pending', 'approved', 'rejected'];
+  final List<String> _statuses = ['all', 'due', 'expired', 'pending', 'approved', 'rejected'];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     
     // Sync tab changes with provider filter
     _tabController.addListener(() {
@@ -93,7 +93,7 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen>
     );
   }
 
-  Widget _buildList(BuildContext context) {
+  Widget _buildList(BuildContext context, String tabStatus) {
     return Consumer<AdminProvider>(
       builder: (context, provider, _) {
         final state = provider.subscriptionsState;
@@ -124,7 +124,7 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen>
           );
         }
 
-        final subs = state.filteredSubscriptions;
+        final subs = provider.subscriptionsState.getSubscriptionsForTab(tabStatus);
 
         if (subs.isEmpty) {
           return const Center(
@@ -317,6 +317,8 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen>
               labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
               tabs: const [
                 Tab(text: 'All'),
+                Tab(text: 'Due'),
+                Tab(text: 'Expired'),
                 Tab(text: 'Pending'),
                 Tab(text: 'Approved'),
                 Tab(text: 'Rejected'),
@@ -328,10 +330,12 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen>
               child: TabBarView(
                 controller: _tabController,
                 children: [
-                  _buildList(context),
-                  _buildList(context),
-                  _buildList(context),
-                  _buildList(context),
+                  _buildList(context, 'all'),
+                  _buildList(context, 'due'),
+                  _buildList(context, 'expired'),
+                  _buildList(context, 'pending'),
+                  _buildList(context, 'approved'),
+                  _buildList(context, 'rejected'),
                 ],
               ),
             ),

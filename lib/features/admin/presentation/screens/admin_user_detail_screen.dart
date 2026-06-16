@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../../../subscription/data/models/subscription_plan_model.dart';
+import '../../../subscription/data/datasources/subscription_remote_datasource.dart';
 import '../../domain/entities/index.dart';
 import '../providers/admin_provider.dart';
 import '../widgets/status_badge.dart';
@@ -308,10 +312,32 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
                             color: const Color(0xFFFF6B00),
                             isLoading: state.isActionLoading,
                             onTap: () async {
+                              // Show loading indicator while fetching plans
+                              showDialog(
+                                context: context,
+                                barrierDismissible: false,
+                                builder: (context) => const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B00))),
+                              );
+                              
+                              List<SubscriptionPlanModel> plans = [];
+                              try {
+                                final ds = SubscriptionRemoteDataSource();
+                                plans = await ds.getSubscriptionPlans();
+                              } catch (e) {
+                                debugPrint('Failed to load plans: $e');
+                              }
+                              
+                              if (mounted) Navigator.pop(context); // hide loading
+
+                              if (plans.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to load plans')));
+                                return;
+                              }
+
                               final reasonController = TextEditingController();
                               String? selectedDate;
                               
-                              final plan = await showDialog<String>(
+                              final plan = await showDialog<SubscriptionPlanModel>(
                                 context: context,
                                 builder: (context) => Dialog(
                                   backgroundColor: Colors.transparent,
@@ -350,17 +376,16 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
                                           ),
                                         ),
                                         const SizedBox(height: 24),
-                                        _PlanSelectionTile(
-                                          title: 'Monthly Plan',
-                                          icon: Icons.calendar_month_rounded,
-                                          onTap: () => Navigator.pop(context, 'plan-monthly'),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        _PlanSelectionTile(
-                                          title: 'Yearly Plan',
-                                          icon: Icons.workspace_premium_rounded,
-                                          onTap: () => Navigator.pop(context, 'plan-yearly'),
-                                        ),
+                                        ...plans.map((p) => Padding(
+                                          padding: const EdgeInsets.only(bottom: 12),
+                                          child: _PlanSelectionTile(
+                                            title: p.name.isEmpty ? p.planId : p.name,
+                                            icon: p.planId.toLowerCase().contains('free') 
+                                                ? Icons.money_off_rounded 
+                                                : (p.duration.toLowerCase().contains('year') ? Icons.workspace_premium_rounded : Icons.calendar_month_rounded),
+                                            onTap: () => Navigator.pop(context, p),
+                                          ),
+                                        )).toList(),
                                       ],
                                     ),
                                   ),
@@ -369,9 +394,18 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
 
                               if (plan != null && mounted) {
                                 final now = DateTime.now();
-                                final expiry = plan == 'plan-yearly'
-                                    ? DateTime(now.year + 1, now.month, now.day)
-                                    : DateTime(now.year, now.month + 1, now.day);
+                                final isYearly = plan.duration.toLowerCase() == 'yearly' || plan.planId.toLowerCase().contains('year');
+                                final isFree = plan.price == 0 || plan.planId.toLowerCase().contains('free');
+                                
+                                DateTime expiry;
+                                if (isFree) {
+                                  expiry = DateTime(now.year + 10, now.month, now.day); // Free plans basically don't expire for a long time
+                                } else if (isYearly) {
+                                  expiry = DateTime(now.year + 1, now.month, now.day);
+                                } else {
+                                  expiry = DateTime(now.year, now.month + 1, now.day);
+                                }
+                                
                                 final defaultDateStr = "${expiry.year}-${expiry.month.toString().padLeft(2, '0')}-${expiry.day.toString().padLeft(2, '0')}";
                                 selectedDate = defaultDateStr;
 
@@ -475,7 +509,7 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
                                 if (details != null && mounted) {
                                   await provider.grantSubscription(
                                     userId: widget.userId, 
-                                    planId: plan,
+                                    planId: plan.planId,
                                     expiryDate: details['date'],
                                     reason: details['reason'],
                                   );
