@@ -58,6 +58,11 @@ class AdminRepositoryImpl implements AdminRepository {
   }
 
   @override
+  Future<List<SubscriptionEntity>> getDueSubscriptions() async {
+    return await remoteDataSource.getDueSubscriptions(token: token);
+  }
+
+  @override
   Future<SubscriptionEntity> getSubscriptionDetail({
     required String subId,
   }) async {

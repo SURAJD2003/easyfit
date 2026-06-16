@@ -76,11 +76,13 @@ class ApiClient {
             }
 
             // If we reach here, refresh failed or no token was available
-            _token = null;
-            await prefs.remove('auth_token');
-            await prefs.remove('auth_refresh_token');
+            // We intentionally do NOT clear tokens or logout automatically,
+            // as requested by the client. The user must manually log out.
+            // _token = null;
+            // await prefs.remove('auth_token');
+            // await prefs.remove('auth_refresh_token');
           } catch (e) {
-            _token = null;
+            // Do not clear _token on error to avoid automatic logout
           }
         }
         return handler.next(error);

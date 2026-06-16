@@ -103,19 +103,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                   // Left: menu + title + welcome
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment: CrossAxisAlignment.center,
                                       children: [
-                                        Row(
+                                        Stack(
+                                          alignment: Alignment.center,
                                           children: [
-                                            IconButton(
-                                              onPressed: () => AdminMainScreen.scaffoldKey.currentState?.openDrawer(),
-                                              icon: const Icon(
-                                                Icons.menu_rounded,
-                                                color: _accent,
-                                                size: 28,
+                                            Align(
+                                              alignment: Alignment.centerLeft,
+                                              child: IconButton(
+                                                onPressed: () => AdminMainScreen.scaffoldKey.currentState?.openDrawer(),
+                                                icon: const Icon(
+                                                  Icons.menu_rounded,
+                                                  color: _accent,
+                                                  size: 28,
+                                                ),
                                               ),
                                             ),
-                                            const SizedBox(width: 12),
                                             const Text(
                                               'Dashboard',
                                               style: TextStyle(
@@ -136,6 +139,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                         ),
                                         const SizedBox(height: 4),
                                         Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
                                           children: [
                                             Text(
                                               adminName,
@@ -154,89 +158,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                         ),
                                       ],
                                     ),
-                                  ),
-                                  // Right: notification bell + hero image
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Stack(
-                                        clipBehavior: Clip.none,
-                                        children: [
-                                          const Icon(
-                                            Icons.notifications_none_rounded,
-                                            color: Colors.white,
-                                            size: 28,
-                                          ),
-                                          Positioned(
-                                            right: -3,
-                                            top: -4,
-                                            child: Container(
-                                              width: 18,
-                                              height: 18,
-                                              decoration: const BoxDecoration(
-                                                color: _accent,
-                                                shape: BoxShape.circle,
-                                              ),
-                                              child: const Center(
-                                                child: Text(
-                                                  '3',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      // Hero fitness image with orange splash
-                                      ClipRRect(
-                                        borderRadius: BorderRadius.circular(16),
-                                        child: Stack(
-                                          children: [
-                                            Image.network(
-                                              'https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?auto=format&fit=crop&w=400&q=80',
-                                              width: 110,
-                                              height: 130,
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (context, e, s) =>
-                                                  Container(
-                                                width: 110,
-                                                height: 130,
-                                                color: const Color(0xFF1A1A1A),
-                                                child: const Icon(
-                                                  Icons.fitness_center,
-                                                  color: _accent,
-                                                  size: 36,
-                                                ),
-                                              ),
-                                            ),
-                                            // Orange splash overlay at bottom
-                                            Positioned(
-                                              bottom: 0,
-                                              left: 0,
-                                              right: 0,
-                                              child: Container(
-                                                height: 50,
-                                                decoration: BoxDecoration(
-                                                  gradient: LinearGradient(
-                                                    begin: Alignment.bottomCenter,
-                                                    end: Alignment.topCenter,
-                                                    colors: [
-                                                      _accent.withOpacity(0.7),
-                                                      Colors.transparent,
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
                                   ),
                                 ],
                               ),
@@ -294,9 +215,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                       ),
                                     ],
                                   ),
-                                  const SizedBox(height: 10),
-                                  // Row 3: Average Daily Steps (wide with footprints)
-                                  _StepsCard(avgDailySteps: analytics.avgDailySteps),
                                 ],
                               ),
                             ),
@@ -315,30 +233,39 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                             Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 16),
                               child: Container(
-                                padding: const EdgeInsets.all(16),
+                                padding: const EdgeInsets.all(20),
                                 decoration: BoxDecoration(
-                                  color: _cardColor,
-                                  borderRadius: BorderRadius.circular(20),
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: [
+                                      _accent.withOpacity(0.15),
+                                      _accent.withOpacity(0.05),
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(24),
                                   border: Border.all(
-                                    color: Colors.white.withOpacity(0.06),
+                                    color: _accent.withOpacity(0.2),
+                                    width: 1.5,
                                   ),
                                 ),
                                 child: Row(
                                   children: [
                                     Container(
-                                      width: 46,
-                                      height: 46,
+                                      width: 52,
+                                      height: 52,
                                       decoration: BoxDecoration(
-                                        color: _accent.withOpacity(0.15),
-                                        shape: BoxShape.circle,
+                                        color: _accent.withOpacity(0.2),
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(color: _accent.withOpacity(0.3)),
                                       ),
                                       child: const Icon(
-                                        Icons.bar_chart_rounded,
+                                        Icons.auto_graph_rounded,
                                         color: _accent,
-                                        size: 22,
+                                        size: 28,
                                       ),
                                     ),
-                                    const SizedBox(width: 12),
+                                    const SizedBox(width: 16),
                                     const Expanded(
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -347,27 +274,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                             'Keep it up!',
                                             style: TextStyle(
                                               color: _accent,
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w700,
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.w800,
                                             ),
                                           ),
-                                          SizedBox(height: 4),
+                                          SizedBox(height: 6),
                                           Text(
                                             'Your active users are growing. Keep engaging your community.',
                                             style: TextStyle(
-                                              color: Colors.white54,
-                                              fontSize: 12,
+                                              color: Colors.white70,
+                                              fontSize: 13,
                                               height: 1.4,
                                             ),
                                           ),
                                         ],
                                       ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    const Icon(
-                                      Icons.trending_up_rounded,
-                                      color: _accent,
-                                      size: 32,
                                     ),
                                   ],
                                 ),
@@ -390,142 +311,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }
 }
 
-// ── Average Daily Steps card with footprint decoration ──────────────────────
-class _StepsCard extends StatelessWidget {
-  final double avgDailySteps;
-  const _StepsCard({required this.avgDailySteps});
 
-  static const Color _accent = Color(0xFFFF6B00);
-  static const Color _cardColor = Color(0xFF1A1A1A);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.06)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.25),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          // Icon
-          Container(
-            width: 48,
-            height: 48,
-            decoration: const BoxDecoration(
-              color: _accent,
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.directions_walk_rounded,
-              color: Colors.white,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 12),
-          // Text content
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Average Daily Steps',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.85),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  avgDailySteps.toStringAsFixed(2),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w700,
-                    height: 1,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Average steps across users',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.5),
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Footprint decoration
-          Padding(
-            padding: const EdgeInsets.only(right: 4),
-            child: _FootprintDecoration(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _FootprintDecoration extends StatelessWidget {
-  static const Color _accent = Color(0xFFFF6B00);
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 52,
-      height: 60,
-      child: Stack(
-        children: [
-          // Left footprint (top)
-          Positioned(
-            left: 0,
-            top: 0,
-            child: Icon(
-              Icons.directions_walk_rounded,
-              color: _accent.withOpacity(0.35),
-              size: 26,
-            ),
-          ),
-          // Right footprint (bottom-right)
-          Positioned(
-            right: 0,
-            bottom: 0,
-            child: Icon(
-              Icons.directions_walk_rounded,
-              color: _accent.withOpacity(0.55),
-              size: 26,
-            ),
-          ),
-          // Dotted line between them
-          Positioned(
-            left: 12,
-            top: 26,
-            child: Container(
-              width: 2,
-              height: 10,
-              decoration: BoxDecoration(
-                color: _accent.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(1),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // ── Error view ────────────────────────────────────────────────────────────────
 class _ErrorView extends StatelessWidget {

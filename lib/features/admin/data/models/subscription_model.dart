@@ -17,10 +17,10 @@ class SubscriptionModel extends SubscriptionEntity {
 
   factory SubscriptionModel.fromJson(Map<String, dynamic> json) {
     return SubscriptionModel(
-      id: json['id']?.toString() ?? '',
+      id: json['id']?.toString() ?? json['subscriptionId']?.toString() ?? '',
       userId: json['userId']?.toString() ?? '',
       userName: json['userName']?.toString() ?? 'Unknown User',
-      userEmail: json['userEmail']?.toString() ?? '',
+      userEmail: json['userEmail']?.toString() ?? json['userPhone']?.toString() ?? '',
       plan: json['plan']?.toString() ?? 'free',
       status: json['status']?.toString() ?? 'pending',
       requestedAt: json['requestedAt'] != null

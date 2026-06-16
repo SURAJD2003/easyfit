@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/datasources/admin_remote_datasource.dart';
 import '../../data/repositories/admin_repository_impl.dart';
+import '../../data/models/subscription_model.dart';
 import '../../domain/entities/index.dart';
 import '../../domain/usecases/index.dart';
 
@@ -121,9 +122,13 @@ class SubscriptionsState {
   });
 
   List<SubscriptionEntity> get filteredSubscriptions {
+    return getSubscriptionsForTab(filterStatus ?? 'all');
+  }
+
+  List<SubscriptionEntity> getSubscriptionsForTab(String tabStatus) {
     var filtered = subscriptions;
-    if (filterStatus != 'all') {
-      filtered = filtered.where((s) => s.status == filterStatus).toList();
+    if (tabStatus != 'all') {
+      filtered = filtered.where((s) => s.status.toLowerCase() == tabStatus.toLowerCase()).toList();
     }
     if (searchQuery.isNotEmpty) {
       final query = searchQuery.toLowerCase();
@@ -316,9 +321,18 @@ class AdminProvider extends ChangeNotifier {
       
       // Stop activity tracking service if running
       try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('active_session_id'); // Clear any tracking session
+
         final service = FlutterBackgroundService();
         if (await service.isRunning()) {
           service.invoke('stopService');
+          // Try again after a delay to handle race conditions
+          Future.delayed(const Duration(seconds: 2), () async {
+            if (await service.isRunning()) {
+              service.invoke('stopService');
+            }
+          });
         }
       } catch (e) {
         debugPrint('Failed to stop background service: $e');
@@ -351,9 +365,18 @@ class AdminProvider extends ChangeNotifier {
       
       // Stop activity tracking service if running
       try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('active_session_id'); // Clear any tracking session
+
         final service = FlutterBackgroundService();
         if (await service.isRunning()) {
           service.invoke('stopService');
+          // Try again after a delay to handle race conditions
+          Future.delayed(const Duration(seconds: 2), () async {
+            if (await service.isRunning()) {
+              service.invoke('stopService');
+            }
+          });
         }
       } catch (e) {
         debugPrint('Failed to stop background service: $e');
@@ -511,17 +534,40 @@ class AdminProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final subs = await GetSubscriptionsUseCase(
-        repository: _buildRepo(),
-      ).call();
+      final repo = _buildRepo();
+      final regular = await repo.getSubscriptions();
+      
+      List<SubscriptionEntity> combined = List.from(regular);
+      
+      try {
+        final due = await repo.getDueSubscriptions();
+        final List<SubscriptionEntity> mappedDue = due.map<SubscriptionEntity>((e) => SubscriptionModel(
+          id: e.id,
+          userId: e.userId,
+          userName: e.userName,
+          userEmail: e.userEmail,
+          plan: e.plan,
+          status: 'due',
+          requestedAt: e.requestedAt,
+          resolvedAt: e.resolvedAt,
+          expiryDate: e.expiryDate,
+          note: e.note,
+          reason: e.reason,
+        )).toList();
+        
+        combined.addAll(mappedDue);
+      } catch (e) {
+        debugPrint('Failed to fetch due subscriptions: $e');
+      }
+
       _subscriptionsState = _subscriptionsState.copyWith(
-        subscriptions: subs,
+        subscriptions: combined,
         isLoading: false,
       );
     } catch (e) {
       _subscriptionsState = _subscriptionsState.copyWith(
-        isLoading: false,
         error: _parseError(e),
+        isLoading: false,
       );
     }
     notifyListeners();
@@ -788,8 +834,10 @@ class AdminProvider extends ChangeNotifier {
     final msg = e.toString().replaceAll('Exception: ', '').trim();
 
     if (msg.contains('401') ||
-        msg.toLowerCase().contains('unauthorized') ||
-        msg.toLowerCase().contains('invalid')) {
+        msg.toLowerCase().contains('unauthorized')) {
+      return 'Session expired. Please log in again.';
+    }
+    if (msg.toLowerCase().contains('invalid')) {
       return 'Invalid email or password.';
     }
     if (msg.contains('403')) return 'Access denied.';
