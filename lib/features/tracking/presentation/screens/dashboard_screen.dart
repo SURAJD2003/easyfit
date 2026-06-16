@@ -3782,11 +3782,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(child: _habitCard(icon: '💊', title: 'Take Tablet', subtitle: 'Take your\nmorning tablet', done: _habitTablet)),
+            Expanded(child: _habitCard(icon: '💊', title: 'Take Multiv.', subtitle: 'Take your\nmultivitamin', done: _habitTablet)),
             const SizedBox(width: 10),
-            Expanded(child: _habitCard(icon: '💧', title: 'Drink Water', subtitle: 'Drink a glass\nof water', done: _habitWater)),
+            Expanded(child: _habitCard(icon: '💧', title: 'Water 500ml', subtitle: 'Drink 500ml\nof water', done: _habitWater)),
             const SizedBox(width: 10),
-            Expanded(child: _habitCard(icon: '🚶', title: 'Walk', subtitle: 'Completes at\n1000 steps', done: _habitWalk)),
+            Expanded(child: _habitCard(icon: '🚶', title: '1000 Steps', subtitle: 'Completes at\n1000 steps', done: _habitWalk)),
           ],
         ),
       ),
@@ -3939,7 +3939,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final streakSubtitle = nextPhase != null
         ? (daysCompleted >= daysNeeded
             ? '🎯 $streakDays day streak! Advancing to $nextPhase'
-            : '$daysCompleted/$daysNeeded days to unlock $nextPhase • ${remaining > 0 ? "$remaining steps left today" : "✅ Today\'s goal done!"}')
+            : '$daysCompleted/$daysNeeded days to unlock $nextPhase')
         : '🔥 $streakDays day streak in Limit Zone!';
 
     return Padding(
@@ -3975,6 +3975,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   const SizedBox(width: 12),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(currentPhase, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: _T.hi)),
+                    const SizedBox(height: 4),
+                    // Highlighted steps counter
+                    remaining > 0
+                        ? RichText(text: TextSpan(children: [
+                            TextSpan(text: '$currentSteps', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w800, color: _T.accent)),
+                            TextSpan(text: '/$phaseGoal', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w800, color: _T.accent.withOpacity(0.5))),
+                            TextSpan(text: ' steps left', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w500, color: _T.mid)),
+                          ]))
+                        : Text('✅ Today\'s goal done!', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: _T.green)),
                     const SizedBox(height: 3),
                     Text(streakSubtitle, style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
                   ])),
