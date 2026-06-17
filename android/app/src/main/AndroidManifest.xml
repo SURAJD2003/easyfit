@@ -8,7 +8,7 @@
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
-        android:label="the_easyfit_clinic"
+        android:label="EasyFit Clinics"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
