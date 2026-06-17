@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../providers/auth_provider.dart';
 
@@ -432,7 +433,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     color: const Color(0xFFFF7A00),
                   ),
                   recognizer: TapGestureRecognizer()
-                    ..onTap = () => _showSnackBar('Terms page'),
+                    ..onTap = () => launchUrl(Uri.parse('https://theeasyfitclinics.com/terms.html')),
                 ),
                 TextSpan(
                   text: ' and ',
@@ -450,7 +451,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     color: const Color(0xFFFF7A00),
                   ),
                   recognizer: TapGestureRecognizer()
-                    ..onTap = () => _showSnackBar('Privacy page'),
+                    ..onTap = () => launchUrl(Uri.parse('https://theeasyfitclinics.com/privacy.html')),
                 ),
               ],
             ),

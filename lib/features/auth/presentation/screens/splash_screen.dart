@@ -122,8 +122,14 @@ class _SplashScreenState extends State<SplashScreen>
     await adminAuth.loadSavedSession();
 
     // Fetch fresh profile and subscription status from server
-    await auth.fetchProfile();
-    await auth.fetchSubscriptionStatus();
+    // If offline, these will fail silently — we'll use cached status
+    bool fetchedOnline = true;
+    try {
+      await auth.fetchProfile();
+      await auth.fetchSubscriptionStatus();
+    } catch (_) {
+      fetchedOnline = false;
+    }
     
     if (!mounted) return;
     
@@ -137,7 +143,14 @@ class _SplashScreenState extends State<SplashScreen>
       if (auth.isApproved) {
         context.go(RouteNames.dashboard);
       } else {
-        context.go(RouteNames.approvalPending);
+        // If we couldn't fetch online, check cached approval status
+        // This prevents showing the approval screen when the user is offline
+        final cachedApproved = await auth.getCachedApprovalStatus();
+        if (cachedApproved) {
+          context.go(RouteNames.dashboard);
+        } else {
+          context.go(RouteNames.approvalPending);
+        }
       }
     } else {
       context.go(RouteNames.onboarding);

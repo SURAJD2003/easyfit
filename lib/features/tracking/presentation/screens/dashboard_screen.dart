@@ -3782,18 +3782,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(child: _habitCard(icon: '💊', title: 'Take Multiv.', subtitle: 'Take your\nmultivitamin', done: _habitTablet)),
+            Expanded(child: _habitCard(icon: '💊', title: 'Take Multiv.', done: _habitTablet)),
             const SizedBox(width: 10),
-            Expanded(child: _habitCard(icon: '💧', title: 'Water 500ml', subtitle: 'Drink 500ml\nof water', done: _habitWater)),
+            Expanded(child: _habitCard(icon: '💧', title: 'Water 500ml', done: _habitWater)),
             const SizedBox(width: 10),
-            Expanded(child: _habitCard(icon: '🚶', title: '1000 Steps', subtitle: 'Completes at\n1000 steps', done: _habitWalk)),
+            Expanded(child: _habitCard(icon: '🚶', title: '1000 Steps', done: _habitWalk)),
           ],
         ),
       ),
     );
   }
 
-  Widget _habitCard({required String icon, required String title, required String subtitle, required bool done}) {
+  Widget _habitCard({required String icon, required String title, required bool done}) {
     if (done) {
       // Completed state — no animation
       return AnimatedContainer(
@@ -3815,12 +3815,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             ]),
             const SizedBox(height: 10),
             Text(title, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: _T.accent)),
-            const SizedBox(height: 6),
-            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Padding(padding: EdgeInsets.only(top: 1), child: Icon(Icons.check_rounded, size: 12, color: _T.accent)),
-              const SizedBox(width: 4),
-              Expanded(child: Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: _T.accent.withOpacity(0.7), height: 1.5))),
-            ]),
           ],
         ),
       );
@@ -3853,12 +3847,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               ]),
               const SizedBox(height: 10),
               Text(title, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: _T.hi)),
-              const SizedBox(height: 6),
-              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Padding(padding: const EdgeInsets.only(top: 1), child: Icon(Icons.circle_outlined, size: 12, color: Color.lerp(_T.lo, _T.accent, pulse * 0.4))),
-                const SizedBox(width: 4),
-                Expanded(child: Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: _T.mid, height: 1.5))),
-              ]),
             ],
           ),
         );
@@ -3892,8 +3880,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     
     // Update local phase level from backend (for icon lookups elsewhere)
     if (phaseLevel != _currentPhaseLevel) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (mounted) setState(() => _currentPhaseLevel = phaseLevel);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt('current_phase_level', phaseLevel);
       });
     }
     
@@ -3906,7 +3896,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final allDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     List<String> dayLabels;
     List<int> doneIndices = [];
+    List<int> missedIndices = [];
     const currentIndex = 6; // today is always rightmost
+    
+    final todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
     
     if (last7Days.length >= 7) {
       // Use the API's last7Days data directly
@@ -3919,11 +3912,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           return '—';
         }
       });
-      // Mark days where goalMet is true
+      // Mark days where goalMet is true, and missed days (past, not met)
       for (int i = 0; i < 7; i++) {
         final goalMet = last7Days[i]['goalMet'] ?? false;
+        final dateStr = (last7Days[i]['date'] ?? '').toString();
         if (goalMet == true) {
           doneIndices.add(i);
+        } else if (dateStr.compareTo(todayDate) < 0) {
+          // Past day and goal not met = missed
+          missedIndices.add(i);
         }
       }
     } else {
@@ -3976,16 +3973,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(currentPhase, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: _T.hi)),
                     const SizedBox(height: 4),
-                    // Highlighted steps counter
+                    Text(streakSubtitle, style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
+                    const SizedBox(height: 3),
                     remaining > 0
                         ? RichText(text: TextSpan(children: [
-                            TextSpan(text: '$currentSteps', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w800, color: _T.accent)),
-                            TextSpan(text: '/$phaseGoal', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w800, color: _T.accent.withOpacity(0.5))),
-                            TextSpan(text: ' steps left', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w500, color: _T.mid)),
+                            TextSpan(text: '• ', style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
+                            TextSpan(text: '$remaining', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: _T.accent)),
+                            TextSpan(text: ' steps left today', style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
                           ]))
-                        : Text('✅ Today\'s goal done!', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: _T.green)),
-                    const SizedBox(height: 3),
-                    Text(streakSubtitle, style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
+                        : Text('• ✅ Today\'s goal done!', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: _T.green)),
                   ])),
                   const SizedBox(width: 12),
                   GestureDetector(
@@ -4017,6 +4013,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   child: Row(
                     children: List.generate(dayLabels.length, (i) {
                       final isDone = doneIndices.contains(i);
+                      final isMissed = missedIndices.contains(i);
                       final isToday = i == currentIndex;
                       final isLast = i == dayLabels.length - 1;
                       return Expanded(
@@ -4028,15 +4025,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 gradient: isDone ? const LinearGradient(colors: [Color(0xFFFF6B2B), Color(0xFFFF9A3C)], begin: Alignment.topLeft, end: Alignment.bottomRight) : null,
-                                color: isDone ? null : _T.card2,
-                                border: isToday ? Border.all(color: _T.accent, width: 2) : Border.all(color: isDone ? Colors.transparent : _T.lo.withOpacity(0.4)),
+                                color: isDone ? null : isMissed ? const Color(0xFF2A1515) : _T.card2,
+                                border: isToday ? Border.all(color: _T.accent, width: 2) : Border.all(color: isDone ? Colors.transparent : isMissed ? const Color(0xFF5A2020) : _T.lo.withOpacity(0.4)),
                                 boxShadow: isDone ? [BoxShadow(color: _T.accent.withOpacity(0.4), blurRadius: 6)] : null,
                               ),
                               child: Center(child: isDone
                                   ? const Icon(Icons.check_rounded, color: Colors.white, size: 13)
-                                  : isToday
-                                      ? Container(width: 6, height: 6, decoration: const BoxDecoration(shape: BoxShape.circle, color: _T.accent))
-                                      : null),
+                                  : isMissed
+                                      ? const Icon(Icons.close_rounded, color: Color(0xFFFF4444), size: 13)
+                                      : isToday
+                                          ? Container(width: 6, height: 6, decoration: const BoxDecoration(shape: BoxShape.circle, color: _T.accent))
+                                          : null),
                             ),
                             const SizedBox(height: 5),
                             Text(dayLabels[i], style: GoogleFonts.inter(

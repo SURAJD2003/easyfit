@@ -53,10 +53,25 @@ class AuthProvider extends ChangeNotifier {
     print('DEBUG: isApproved check — subStatus: "$subStatus", profileStatus: "$profileStatus"');
     
     // Approved if subscription is active/approved/premium OR if account itself is active
-    return subStatus == 'active' || 
+    final approved = subStatus == 'active' || 
            subStatus == 'approved' || 
            subStatus == 'premium' || 
            profileStatus == 'active';
+    
+    // Cache the approval status for offline use
+    if (approved) {
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setBool('cached_is_approved', true);
+      });
+    }
+    
+    return approved;
+  }
+  
+  /// Fallback for offline: read cached approval status
+  Future<bool> getCachedApprovalStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('cached_is_approved') ?? false;
   }
 
   bool get isRejected {
