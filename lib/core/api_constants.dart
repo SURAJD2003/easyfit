@@ -42,22 +42,22 @@ class ApiConstants {
   static const String adminLogin = '/admin/login';
   static const String adminProfile = '/admin/profile';
   static const String adminDashboardStats = '/admin/dashboard/stats';
-  static const String adminUsers = '/admin/users';
-  static const String adminAnalytics = '/admin/analytics';
-  static const String adminReportsOverview = '/admin/reports/overview';
+  static const String adminUsers = '/api/admin/users';
+  static const String adminAnalytics = '/api/admin/analytics';
+  static const String adminReportsOverview = '/api/admin/reports/overview';
   static const String adminNotificationsBroadcast =
-      '/admin/notifications/broadcast';
+      '/api/admin/notifications/broadcast';
   static const String adminNotificationsSegment =
-      '/admin/notifications/segment';
+      '/api/admin/notifications/segment';
 
   static const String adminSubscriptions =
       '/admin/subscriptions'; // Corrected: removed /api
   static const String adminDueSubscriptions =
       '/admin/dueSubscriptions'; // New
 
-  static String adminUserDetail(String userId) => '/admin/users/$userId';
+  static String adminUserDetail(String userId) => '/api/admin/users/$userId';
   static String adminGrantSubscription(String userId) =>
-      '/admin/grantSubscription/$userId'; // New
+      '/api/admin/grantSubscription/$userId'; // New
   static String adminApproveSubscription(String subId) =>
       '/admin/subscriptions/$subId/approve'; // Corrected: removed /api
   static String adminRejectSubscription(String subId) =>
