@@ -30,6 +30,7 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
   bool _isTracking = false;
   int _lastHour = -1;         // for hourly step tracking
   int _stepsAtHourStart = 0;  // steps when current hour started
+  int _sessionGeneration = 0;  // invalidates delayed syncs from older sessions
 
   // Riverpod ref for milestone updates
   StateController<int>? _milestoneController;
@@ -157,6 +158,8 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
 
   /// Call when the user presses PLAY (or auto-start)
   void startSession() {
+    _sessionGeneration++;
+    _debounce?.cancel();
     _isTracking = true;
     _baseSteps = -1;
     _accumulatedSteps = 0;
@@ -190,6 +193,8 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
   /// Used after silent sync (stop → start) to carry forward the day's step total
   /// so new steps ADD on top instead of restarting from 0.
   void resumeWithAccumulated(int accumulatedTotal) {
+    _sessionGeneration++;
+    _debounce?.cancel();
     _isTracking = true;
     _accumulatedSteps = accumulatedTotal;
     _baseSteps = -1; // will re-calibrate on next pedometer event
@@ -216,6 +221,7 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
 
   /// Call when the user presses STOP — freezes the counter
   void stopSession() {
+    _sessionGeneration++;
     _isTracking = false;
     _debounce?.cancel();
     // Clear persisted state
@@ -229,6 +235,8 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
 
   /// Called at midnight to reset steps for the new day (session stays active)
   void resetForNewDay() {
+    _sessionGeneration++;
+    _debounce?.cancel();
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
     debugPrint('🌙 PedometerNotifier: resetting for new day $today');
     _accumulatedSteps = 0;
@@ -343,11 +351,15 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
     // Sync if steps changed by at least 5 (lowered from 20 to catch small walks)
     if ((sessionSteps - _lastSyncedSteps).abs() > 5) {
       if (_debounce?.isActive ?? false) _debounce?.cancel();
+      final scheduledGeneration = _sessionGeneration;
       _debounce = Timer(const Duration(seconds: 2), () async {
+        if (!_isTracking || scheduledGeneration != _sessionGeneration) {
+          return;
+        }
         try {
           final prefs = await SharedPreferences.getInstance();
           final sessionId = prefs.getString('active_session_id') ?? '';
-          if (sessionId.isNotEmpty && _isTracking) {
+          if (sessionId.isNotEmpty && _isTracking && scheduledGeneration == _sessionGeneration) {
             final calories = (sessionSteps * 0.045).round();
             final distance = double.parse((sessionSteps * 0.000762).toStringAsFixed(3));
             await repo.syncSteps(

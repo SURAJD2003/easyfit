@@ -42,6 +42,7 @@ void onStart(ServiceInstance service) async {
 
   // Check if there's actually an active session
   final sessionId = prefsInit.getString('active_session_id');
+  String boundSessionId = sessionId ?? '';
   if (sessionId == null || sessionId.isEmpty) {
     debugPrint('⚠️ BG: No active session, stopping service');
     service.stopSelf();
@@ -149,6 +150,14 @@ void onStart(ServiceInstance service) async {
           final newSessionId = (respData is Map) ? (respData['sessionId'] ?? respData['id'] ?? '') : '';
           if (newSessionId.toString().isNotEmpty) {
             await prefs.setString('active_session_id', newSessionId.toString());
+            boundSessionId = newSessionId.toString();
+            
+            // Fix: Reset pedometer memory so yesterday's steps do not leak into the new day's session
+            baseSteps = -1;
+            currentSteps = 0;
+            accumulatedBefore = 0;
+            await prefs.setInt('session_accumulated_steps', 0);
+            
             debugPrint('✅ Midnight: started new day session: $newSessionId');
           }
         } catch (e) {
@@ -251,6 +260,15 @@ void onStart(ServiceInstance service) async {
         return;
       }
       
+      if (currentSessionId != boundSessionId) {
+        debugPrint('BG: Session changed ($boundSessionId -> $currentSessionId), stopping stale service');
+        pedometerSub?.cancel();
+        syncTimer?.cancel();
+        notifPlugin.cancel(888);
+        service.stopSelf();
+        return;
+      }
+      
       // If session is a local offline one, try to swap it for a real backend session.
       // If that fails (still offline), skip the sync but keep counting locally.
       if (currentSessionId.startsWith('local_')) {
@@ -277,8 +295,8 @@ void onStart(ServiceInstance service) async {
           final realSessionId = (respData is Map) ? (respData['sessionId'] ?? respData['id'] ?? '') : '';
           if (realSessionId.toString().isNotEmpty) {
             await prefs.setString('active_session_id', realSessionId.toString());
+            boundSessionId = realSessionId.toString();
             debugPrint('✅ BG: Swapped local → real session: $realSessionId');
-            // Don't return — continue to sync with the new real session ID below
           } else {
             debugPrint('⚠️ BG: No session ID returned, skipping sync');
             return;

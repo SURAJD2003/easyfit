@@ -4571,6 +4571,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               debugPrint('📊 Stop: live=$livePedometerSteps, api=${prevApiSteps.toInt()}, bg=$bgAccumulatedSteps, final=$finalSteps, display=$_lastCompletedSteps');
               
               try {
+                await repo.syncSteps(
+                  sessionId: sessionIdToStop,
+                  steps: finalSteps,
+                  calories: finalCalories,
+                  distance: finalDistance,
+                );
                 await repo.stopSession(
                   sessionId: sessionIdToStop,
                   finalSteps: finalSteps,
