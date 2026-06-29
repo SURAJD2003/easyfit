@@ -49,10 +49,10 @@ class _YouScreenState extends State<YouScreen> {
     if (mounted) setState(() => _currentPhaseLevel = saved);
   }
 
-  static const _phaseNames = [
-    'Beginner Phase',
-    'Fat Loss Phase',
-    'Metabolic Phase',
+  static const List<String> _phaseNames = [
+    'Fat Gain',
+    'Fat Maintain',
+    'Metabolic',
     'Transformation Phase',
     'Limit Zone',
   ];
@@ -66,10 +66,10 @@ class _YouScreenState extends State<YouScreen> {
     final initial = name.isNotEmpty ? name[0].toUpperCase() : 'G';
 
     final phaseData = [
-      {'icon': Icons.rocket_launch_rounded,         'name': 'Beginner Phase',       'range': '0 – 5,000 steps',       'color': const Color(0xFF4FC3F7), 'level': 0},
-      {'icon': Icons.local_fire_department_rounded, 'name': 'Fat Loss Phase',        'range': '5,001 – 7,000 steps',   'color': const Color(0xFFFF6B2B), 'level': 1},
-      {'icon': Icons.bolt_rounded,                  'name': 'Metabolic Phase',       'range': '7,001 – 10,000 steps',  'color': const Color(0xFFFFCC00), 'level': 2},
-      {'icon': Icons.fitness_center_rounded,        'name': 'Transformation Phase',  'range': '10,001 – 12,000 steps', 'color': const Color(0xFFBF5AF2), 'level': 3},
+      {'icon': Icons.rocket_launch_rounded,         'name': 'Fat Gain',             'range': '0 – 5,000 steps',       'color': const Color(0xFF4FC3F7), 'level': 0},
+      {'icon': Icons.local_fire_department_rounded, 'name': 'Fat Maintain',         'range': '5,001 – 7,000 steps',   'color': const Color(0xFFFF6B2B), 'level': 1},
+      {'icon': Icons.bolt_rounded,                  'name': 'Metabolic',            'range': '7,001 – 10,000 steps',  'color': const Color(0xFFFFCC00), 'level': 2},
+      {'icon': Icons.fitness_center_rounded,        'name': 'Transformation Phase', 'range': '10,001 – 12,000 steps', 'color': const Color(0xFFBF5AF2), 'level': 3},
       {'icon': Icons.emoji_events_rounded,          'name': 'Limit Zone',            'range': '12,000+ steps',         'color': const Color(0xFFFF2D55), 'level': 4},
     ];
 

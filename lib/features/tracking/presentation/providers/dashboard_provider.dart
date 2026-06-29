@@ -80,9 +80,9 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
     final localToday = DateFormat('yyyy-MM-dd').format(now);
     _lastFetchDate = localToday;
     
-    // Current week: Monday to Sunday
-    final weekStart = now.subtract(Duration(days: now.weekday - 1));
-    final weekEnd = weekStart.add(const Duration(days: 6));
+    // Last 7 days ending today
+    final weekEnd = now;
+    final weekStart = now.subtract(const Duration(days: 6));
     // Current month: 1st to last day
     final monthStart = DateTime(now.year, now.month, 1);
     final monthEnd = DateTime(now.year, now.month + 1, 0);

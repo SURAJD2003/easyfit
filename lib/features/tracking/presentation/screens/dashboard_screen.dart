@@ -1440,6 +1440,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   late final Animation<double> _habitPulse;
   Timer? _midnightTimer; // fires at 00:00 to reset daily data
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  final GlobalKey _streakRepaintKey = GlobalKey();
 
   @override
   void initState() {
@@ -1472,8 +1473,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       final pedNotifier = ref.read(pedometerProvider.notifier);
       final milestoneCtrl = ref.read(milestoneProvider.notifier);
       pedNotifier.attachMilestoneController(milestoneCtrl);
+      
+      // Listen for dashboard state to load, then check for missing steps
+      ref.listenManual(dashboardProvider, (prev, next) {
+        if (!next.isLoading && next.todayActivity != null && !_hasCheckedCatchup) {
+          _hasCheckedCatchup = true;
+          final apiSteps = (next.todayActivity?['steps'] ?? 0) as int;
+          if (_lastCompletedSteps > apiSteps && apiSteps > 0) {
+            final missing = _lastCompletedSteps - apiSteps;
+            _pendingCatchupSteps = missing;
+            debugPrint('🔍 Detected $missing missing steps (local=$_lastCompletedSteps, api=$apiSteps). Pushing now...');
+            _pushMissingStepsOnCurrentSession(missing);
+          }
+        }
+      });
     });
   }
+  
+  bool _hasCheckedCatchup = false;
 
   /// Restore persisted completed steps from today (survives navigation & restarts)
   Future<void> _loadCompletedSteps() async {
@@ -1557,6 +1574,39 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final effectiveSteps = [liveSteps, apiSteps as int, _lastCompletedSteps].reduce((a, b) => a > b ? a : b);
     if (effectiveSteps >= 1000 && !tablet && !water && !walk) {
       _autoCompleteHabits();
+    }
+    
+    // --- MISSING STEPS DETECTION moved to _onDashboardStateChanged (fires after API loads) ---
+  }
+
+  /// Steps that were counted locally but never reached the backend.
+  /// The next silent sync (tab switch / navigate) will include these in finalSteps.
+  int _pendingCatchupSteps = 0;
+
+  /// Push missing steps through the EXISTING active session's sync endpoint.
+  /// This doesn't create a new session — just pushes data on the current one.
+  Future<void> _pushMissingStepsOnCurrentSession(int missingSteps) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final activeSessionId = prefs.getString('active_session_id') ?? '';
+      if (activeSessionId.isEmpty || activeSessionId.startsWith('local_')) return;
+      
+      final repo = ref.read(trackingRepositoryProvider);
+      final cals = (missingSteps * 0.045).toInt();
+      final dist = double.parse((missingSteps * 0.000762).toStringAsFixed(3));
+      
+      await repo.syncSteps(
+        sessionId: activeSessionId,
+        steps: missingSteps,
+        calories: cals,
+        distance: dist,
+      );
+      debugPrint('✅ Catch-up sync pushed $missingSteps steps on session $activeSessionId');
+      
+      // Refresh dashboard to reflect updated backend total
+      ref.read(dashboardProvider.notifier).refreshToday();
+    } catch (e) {
+      debugPrint('⚠️ Catch-up sync failed (will retry on next tab switch): $e');
     }
   }
 
@@ -1994,11 +2044,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           
           // finalSteps is what we send to the backend for THIS SESSION ONLY.
           // It must NOT include _lastCompletedSteps, otherwise the backend will sum the daily total repeatedly!
-          final finalSteps = math.max(sessionSteps, bgAccumulatedSteps);
+          // HOWEVER: if we detected missing steps that never reached the server, include them here.
+          final rawFinalSteps = math.max(sessionSteps, bgAccumulatedSteps);
+          final finalSteps = rawFinalSteps + _pendingCatchupSteps;
           final finalCalories = (finalSteps * 0.045).round();
           final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
           
-          debugPrint('📊 Silent sync: sessionSteps=$sessionSteps, liveDisplay=$livePedometerSteps, cached=$_lastCompletedSteps, final=$finalSteps');
+          if (_pendingCatchupSteps > 0) {
+            debugPrint('🔄 Including $_pendingCatchupSteps catch-up steps in this sync');
+          }
+          debugPrint('📊 Silent sync: sessionSteps=$sessionSteps, liveDisplay=$livePedometerSteps, cached=$_lastCompletedSteps, catchup=$_pendingCatchupSteps, final=$finalSteps');
+          _pendingCatchupSteps = 0; // consumed
           
           // SYNC first — ensures backend has latest steps even if stopSession fails
           try {
@@ -2025,8 +2081,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             debugPrint('⚠️ Stop session API failed: $e');
           }
           
-          // Update _lastCompletedSteps: add THIS session's steps to the running daily total
-          _lastCompletedSteps = _lastCompletedSteps + finalSteps;
+          // Update _lastCompletedSteps: add only NEW session steps (not catch-up, which was already counted locally)
+          _lastCompletedSteps = _lastCompletedSteps + rawFinalSteps;
           // Also consider API — it might be higher if another device synced
           final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
           if (apiSteps.toInt() > _lastCompletedSteps) {
@@ -2115,9 +2171,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
           // finalSteps is what we send to the backend for THIS SESSION ONLY.
           // It must NOT include _lastCompletedSteps!
-          final finalSteps = math.max(sessionSteps, bgAccumulatedSteps);
+          // HOWEVER: if we detected missing steps that never reached the server, include them here.
+          final rawFinalSteps = math.max(sessionSteps, bgAccumulatedSteps);
+          final finalSteps = rawFinalSteps + _pendingCatchupSteps;
           final finalCalories = (finalSteps * 0.045).round();
           final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
+          
+          if (_pendingCatchupSteps > 0) {
+            debugPrint('🔄 Including $_pendingCatchupSteps catch-up steps in tab sync');
+          }
+          _pendingCatchupSteps = 0; // consumed
           
           // SYNC first — ensures backend has latest steps even if stopSession fails
           try {
@@ -2144,8 +2207,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             debugPrint('⚠️ Silent tab sync stop failed: $e');
           }
           
-          // Update _lastCompletedSteps: add THIS session's steps to the running daily total
-          _lastCompletedSteps = _lastCompletedSteps + finalSteps;
+          // Update _lastCompletedSteps: add only NEW session steps (not catch-up, which was already counted locally)
+          _lastCompletedSteps = _lastCompletedSteps + rawFinalSteps;
           final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
           if (apiSteps.toInt() > _lastCompletedSteps) {
             _lastCompletedSteps = apiSteps.toInt();
@@ -3507,11 +3570,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           _heroCard(state, sessionSteps),
           _sectionLabel('Morning Habits'),
           _morningHabitsSection(),
-          _sectionLabel('Streak'),
-          _premiumStreakCard(),
-          _sectionLabel('WEEKLY OVERVIEW'),
-          _weekChart(state),
-          const SizedBox(height: 8),
+          _sectionLabel('Streak', trailing: IconButton(
+            icon: const Icon(Icons.share_rounded, size: 20, color: _T.mid),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            onPressed: () => ReportShareUtils.captureAndShare(_streakRepaintKey),
+          )),
+          RepaintBoundary(
+            key: _streakRepaintKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _premiumStreakCard(),
+                _sectionLabel('WEEKLY OVERVIEW'),
+                _weekChart(state, sessionSteps),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -3621,9 +3697,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   // ── STEP PHASE HELPER ──────────────────────────────────
   /// Phase names by level index
   static const _phaseNames = [
-    'Beginner Phase',       // level 0: goal 5000
-    'Fat Loss Phase',       // level 1: goal 7000
-    'Metabolic Phase',      // level 2: goal 10000
+    'Fat Gain',             // level 0: goal 5000
+    'Fat Maintain',         // level 1: goal 7000
+    'Metabolic',            // level 2: goal 10000
     'Transformation Phase', // level 3: goal 12000
     'Limit Zone',           // level 4: goal 15000 (max)
   ];
@@ -3666,16 +3742,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   // ── LEGACY HELPERS (used by hero card) ─────────────────
   /// Returns the phase name based on current step count (for display only).
   static String _getPhaseName(int steps) {
-    if (steps <= 5000) return 'Beginner Phase';
-    if (steps <= 7000) return 'Fat Loss Phase';
-    if (steps <= 10000) return 'Metabolic Phase';
+    if (steps <= 5000) return 'Fat Gain';
+    if (steps <= 7000) return 'Fat Maintain';
+    if (steps <= 10000) return 'Metabolic';
     if (steps <= 12000) return 'Transformation Phase';
     return 'Limit Zone';
   }
 
   static String? _getNextPhaseName(int steps) {
-    if (steps <= 5000) return 'Fat Loss Phase';
-    if (steps <= 7000) return 'Metabolic Phase';
+    if (steps <= 5000) return 'Fat Maintain';
+    if (steps <= 7000) return 'Metabolic';
     if (steps <= 10000) return 'Transformation Phase';
     if (steps <= 12000) return 'Limit Zone';
     return null;
@@ -3727,15 +3803,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         padding: const EdgeInsets.fromLTRB(20, 18, 20, 36),
         child: Column(
           children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(calories.toString(), style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w800, color: _T.hi)),
-                  Text('kcal burned', style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
-                ],
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(calories.toString(), style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w800, color: _T.hi)),
+                    Text('kcal burned', style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('${(goal - steps).clamp(0, goal)}', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w800, color: _T.hi)),
+                    Text('steps left', style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
+                  ],
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             AnimatedBuilder(
@@ -3814,7 +3899,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               const Icon(Icons.check_circle_rounded, color: _T.accent, size: 18),
             ]),
             const SizedBox(height: 10),
-            Text(title, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: _T.accent)),
+            FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(title, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: _T.accent))),
           ],
         ),
       );
@@ -3846,7 +3931,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 Icon(Icons.radio_button_unchecked_rounded, color: Color.lerp(_T.lo, _T.accent, pulse * 0.5), size: 18),
               ]),
               const SizedBox(height: 10),
-              Text(title, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: _T.hi)),
+              FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(title, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: _T.hi))),
             ],
           ),
         );
@@ -3933,11 +4018,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     }
 
     // Subtitle
-    final streakSubtitle = nextPhase != null
+    final streakSubtitleWidget = nextPhase != null
         ? (daysCompleted >= daysNeeded
-            ? '🎯 $streakDays day streak! Advancing to $nextPhase'
-            : '$daysCompleted/$daysNeeded days to unlock $nextPhase')
-        : '🔥 $streakDays day streak in Limit Zone!';
+            ? Text('🎯 $streakDays day streak! Advancing to $nextPhase', style: GoogleFonts.inter(fontSize: 11, color: _T.mid))
+            : RichText(text: TextSpan(children: [
+                TextSpan(text: '$daysCompleted/$daysNeeded', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: _T.accent)),
+                TextSpan(text: ' days to unlock $nextPhase', style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
+              ])))
+        : Text('🔥 $streakDays day streak in Limit Zone!', style: GoogleFonts.inter(fontSize: 11, color: _T.mid));
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 22),
@@ -3973,7 +4061,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(currentPhase, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: _T.hi)),
                     const SizedBox(height: 4),
-                    Text(streakSubtitle, style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
+                    streakSubtitleWidget,
                     const SizedBox(height: 3),
                     remaining > 0
                         ? RichText(text: TextSpan(children: [
@@ -3989,7 +4077,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                     child: AnimatedBuilder(
                       animation: _glow,
                       builder: (_, __) => Container(
-                        width: 62,
+                        width: 78,
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(14),
                           color: _T.accent.withOpacity(0.08),
@@ -3999,9 +4087,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                         child: Column(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
                           Icon(_getPhaseIconForLevel(phaseLevel), color: _T.accent, size: 20),
                           const SizedBox(height: 4),
-                          Text(currentPhase.toUpperCase(), textAlign: TextAlign.center, style: GoogleFonts.inter(fontSize: 8, fontWeight: FontWeight.w800, color: _T.accent, letterSpacing: 0.4, height: 1.2)),
+                          Text(currentPhase.toUpperCase(), textAlign: TextAlign.center, style: GoogleFonts.inter(fontSize: 7.5, fontWeight: FontWeight.w800, color: _T.accent, letterSpacing: 0.2, height: 1.2)),
                           const SizedBox(height: 4),
-                          Text(nextPhase != null ? '+${(remaining * 0.045).round()} cal' : '🔥 MAX', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700, color: _T.gold)),
+                          Text(nextPhase != null ? '$remaining left' : '🔥 MAX', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700, color: _T.gold)),
                         ]),
                       ),
                     ),
@@ -4041,7 +4129,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                             Text(dayLabels[i], style: GoogleFonts.inter(
                               fontSize: 9,
                               fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
-                              color: isToday ? _T.accent : isDone ? _T.mid : _T.lo,
+                              color: (dayLabels[i] == 'Wed' || dayLabels[i] == 'Fri') ? _T.purple : (isToday ? _T.accent : isDone ? _T.mid : _T.lo),
                             )),
                           ])),
                           if (!isLast)
@@ -4063,7 +4151,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   }
 
   // ── WEEKLY CHART ─────────────────────────────────────────
-  Widget _weekChart(DashboardState state) {
+  Widget _weekChart(DashboardState state, int sessionSteps) {
     final weeklyData = state.weeklyStats ?? {};
     final daysList = (weeklyData['days'] as List<dynamic>?) ?? [];
     final totalSteps = weeklyData['totalSteps'] ?? 0;
@@ -4094,12 +4182,27 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       stepValues.add(steps);
       calValues.add(cals);
     }
+    
+    // Sync today's graph bar with the pedometer's local live count
+    if (todayIndex != -1) {
+      final liveDailyTotal = _lastCompletedSteps + sessionSteps;
+      final apiSteps = stepValues[todayIndex];
+      final actualSteps = math.max(apiSteps, liveDailyTotal);
+      stepValues[todayIndex] = actualSteps;
+      if (calValues[todayIndex] == 0 && actualSteps > 0) {
+        calValues[todayIndex] = (actualSteps * 0.045).toInt();
+      }
+    }
 
     // Fallback if API returned empty
     if (dayLabels.isEmpty) {
-      dayLabels.addAll(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+      final now = DateTime.now();
+      for (int i = 6; i >= 0; i--) {
+        dayLabels.add(DateFormat('E').format(now.subtract(Duration(days: i))));
+      }
       stepValues.addAll([0, 0, 0, 0, 0, 0, 0]);
       calValues.addAll([0, 0, 0, 0, 0, 0, 0]);
+      todayIndex = 6;
     }
 
     final maxVal = stepValues.isEmpty ? 1.0 : stepValues.reduce(math.max).toDouble();
@@ -4145,8 +4248,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                         child: Container(
                           width: 26, height: barHeight,
                           decoration: BoxDecoration(
-                            gradient: isToday ? _T.accentGrad : null,
-                            color: isToday ? null : _T.card2,
+                            color: isToday ? const Color(0xFFD84315) : const Color(0xFF8C4A23),
                             borderRadius: BorderRadius.circular(5),
                             border: isToday ? Border.all(color: _T.accent.withOpacity(0.5), width: 1) : null,
                           ),
@@ -4771,10 +4873,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     );
   }
 
-  Widget _sectionLabel(String t) {
+  Widget _sectionLabel(String t, {Widget? trailing}) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(22, 28, 22, 12),
-      child: Text(t, style: _Txt.label),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(t, style: _Txt.label),
+          if (trailing != null) trailing,
+        ],
+      ),
     );
   }
 
