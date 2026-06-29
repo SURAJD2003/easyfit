@@ -65,10 +65,7 @@ class PaywallScreen extends ConsumerWidget {
     return SliverAppBar(
       backgroundColor: Colors.transparent,
       elevation: 0,
-      leading: IconButton(
-        icon: const Icon(Icons.close_rounded, color: Colors.white70),
-        onPressed: () => Navigator.pop(context),
-      ),
+      automaticallyImplyLeading: false,
       actions: [
         TextButton(
           onPressed: () {

@@ -47,6 +47,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         if (authProvider.isApproved) {
           context.go(RouteNames.dashboard);
+        } else if (authProvider.needsSubscriptionPlan) {
+          context.go(RouteNames.subscription);
         } else {
           context.go(RouteNames.approvalPending);
         }
@@ -189,11 +191,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   shape: BoxShape.circle,
                   border: Border.all(color: const Color(0xFFFF7A00), width: 3),
                 ),
-                child: const Center(
-                  child: Icon(
-                    Icons.fitness_center,
-                    color: Color(0xFFFF7A00),
-                    size: 40,
+                child: ClipOval(
+                  child: Image.asset(
+                    'assets/images/easyfit_logo.jpg',
+                    fit: BoxFit.cover,
+                    width: 80,
+                    height: 80,
                   ),
                 ),
               ),

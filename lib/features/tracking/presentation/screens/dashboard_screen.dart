@@ -4864,7 +4864,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           ),
           child: ClipOval(
             child: Image.asset(
-              'assets/images/easyfit_logo.png',
+              'assets/images/easyfit_logo.jpg',
               fit: BoxFit.cover,
             ),
           ),
@@ -4975,7 +4975,18 @@ class _SearchSheetState extends State<_SearchSheet> {
                       final item = _filtered[i];
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: Container(width: 36, height: 36, decoration: BoxDecoration(color: _T.accentDim, borderRadius: BorderRadius.circular(10)), child: Icon(Icons.fitness_center_rounded, color: _T.accent, size: 18)),
+                        leading: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(color: _T.accentDim, borderRadius: BorderRadius.circular(10)),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.asset(
+                              'assets/images/easyfit_logo.jpg',
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
                         title: Text(item, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w500, color: _T.hi)),
                         trailing: Icon(Icons.chevron_right_rounded, color: _T.lo, size: 20),
                         onTap: () {

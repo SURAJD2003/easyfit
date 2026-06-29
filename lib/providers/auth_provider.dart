@@ -74,6 +74,24 @@ class AuthProvider extends ChangeNotifier {
     return prefs.getBool('cached_is_approved') ?? false;
   }
 
+  bool get needsSubscriptionPlan {
+    if (isApproved) return false;
+    if (_subscriptionRequest == null) return true;
+    
+    final plan = _subscriptionRequest!.plan.trim().toLowerCase();
+    final status = _subscriptionRequest!.status.trim().toLowerCase();
+    
+    if (plan.isEmpty || plan == 'none' || plan == 'null' || plan == 'free') {
+      return true;
+    }
+    
+    if (status == 'unknown' || status == 'free' || status.isEmpty) {
+      return true;
+    }
+    
+    return false;
+  }
+
   bool get isRejected {
     return _subscriptionRequest?.isRejected ?? false;
   }
