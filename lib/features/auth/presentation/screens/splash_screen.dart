@@ -136,6 +136,8 @@ class _SplashScreenState extends State<SplashScreen>
     if (auth.isAuthenticated) {
       if (auth.isApproved) {
         context.go(RouteNames.dashboard);
+      } else if (auth.needsSubscriptionPlan) {
+        context.go(RouteNames.subscription);
       } else {
         context.go(RouteNames.approvalPending);
       }

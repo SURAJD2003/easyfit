@@ -47,6 +47,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         if (authProvider.isApproved) {
           context.go(RouteNames.dashboard);
+        } else if (authProvider.needsSubscriptionPlan) {
+          context.go(RouteNames.subscription);
         } else {
           context.go(RouteNames.approvalPending);
         }
