@@ -2988,7 +2988,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   }
 
   String _formatSteps(dynamic steps) {
-    final n = steps is int ? steps : int.tryParse(steps.toString()) ?? 0;
+    final n = steps is num ? steps.toInt() : (num.tryParse(steps.toString())?.toInt() ?? 0);
     if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
     return n.toString();
   }
@@ -3568,7 +3568,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         children: [
           _header(),
           _heroCard(state, sessionSteps),
-          _sectionLabel('Morning Habits'),
+          _sectionLabel('Morning Routine'),
           _morningHabitsSection(),
           _sectionLabel('Streak', trailing: IconButton(
             icon: const Icon(Icons.share_rounded, size: 20, color: _T.mid),
@@ -4062,14 +4062,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                     Text(currentPhase, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: _T.hi)),
                     const SizedBox(height: 4),
                     streakSubtitleWidget,
-                    const SizedBox(height: 3),
-                    remaining > 0
-                        ? RichText(text: TextSpan(children: [
-                            TextSpan(text: '• ', style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
-                            TextSpan(text: '$remaining', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: _T.accent)),
-                            TextSpan(text: ' steps left today', style: GoogleFonts.inter(fontSize: 11, color: _T.mid)),
-                          ]))
-                        : Text('• ✅ Today\'s goal done!', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: _T.green)),
+
                   ])),
                   const SizedBox(width: 12),
                   GestureDetector(
@@ -4129,7 +4122,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                             Text(dayLabels[i], style: GoogleFonts.inter(
                               fontSize: 9,
                               fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
-                              color: (dayLabels[i] == 'Wed' || dayLabels[i] == 'Fri') ? _T.purple : (isToday ? _T.accent : isDone ? _T.mid : _T.lo),
+                              color: (dayLabels[i] == 'Wed' || dayLabels[i] == 'Fri') ? _T.gold : (isToday ? _T.accent : isDone ? _T.mid : _T.lo),
                             )),
                           ])),
                           if (!isLast)

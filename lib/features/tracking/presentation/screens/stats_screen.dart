@@ -91,7 +91,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
     return [apiDist, derivedDist].reduce((a, b) => a > b ? a : b);
   }
   int    get _todayActive    => (_todayData?['activeMinutes'] ?? 0) as int;
-  int    get _todayGoal      => _phaseGoals[_currentPhaseLevel.clamp(0, 4)];
+  int    get _todayGoal      => (_todayData?['goalSteps'] as num?)?.toInt() ?? _phaseGoals[_currentPhaseLevel.clamp(0, 4)];
   double get _todayProgress  => ((_todayData?['goalProgress'] ?? 0) as num).toDouble();
 
   // ── Hourly step data (loaded from API) ──
@@ -193,7 +193,21 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
 
   List<String> get _xLabels {
     if (_tabIndex == 0) return ['0', '4', '8', '12', '16', '20', '24'];
-    if (_tabIndex == 1) return ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    if (_tabIndex == 1) {
+      final weekly = ref.watch(dashboardProvider).weeklyStats;
+      final days = weekly?['days'] as List?;
+      if (days != null && days.isNotEmpty) {
+        return days.map((d) {
+          final dtStr = d['date'] ?? '';
+          try {
+            final dt = DateTime.parse(dtStr);
+            return DateFormat('E').format(dt).substring(0, 1);
+          } catch (_) {}
+          return '-';
+        }).toList();
+      }
+      return ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    }
     // Month: generate week labels from API data
     final monthly = ref.watch(dashboardProvider).monthlyStats;
     final weeks = monthly?['weeks'] as List?;
@@ -399,8 +413,11 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
     _selectedPeriod = 0; // Start on THIS WEEK / TODAY / current month
     _loadPhaseLevel(); // load persisted phase level
     _loadCache(); // load completed steps for MAX formula
-    // Trigger a fresh API fetch when stats screen opens
-    Future.microtask(() => ref.read(dashboardProvider.notifier).refresh());
+    // Trigger a fresh API fetch, then load correct data for the selected period
+    Future.microtask(() async {
+      await ref.read(dashboardProvider.notifier).refresh();
+      _fetchForSelectedPeriod();
+    });
   }
 
   /// Load persisted phase level from SharedPreferences
@@ -459,9 +476,10 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
                     child: RefreshIndicator(
                       color: _T.accent,
                       backgroundColor: _T.card,
-                      onRefresh: () {
+                      onRefresh: () async {
                         _hourlyLoaded = false; // reload hourly data on refresh
-                        return ref.read(dashboardProvider.notifier).refresh();
+                        await ref.read(dashboardProvider.notifier).refresh();
+                        _fetchForSelectedPeriod();
                       },
                       child: SingleChildScrollView(
                         physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),

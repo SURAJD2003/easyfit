@@ -5,8 +5,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart' as provider;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../providers/auth_provider.dart';
+import '../providers/dashboard_provider.dart';
 
 
 // ─── Colours (same tokens as dashboard) ───
@@ -28,13 +30,13 @@ class _C {
   );
 }
 
-class YouScreen extends StatefulWidget {
+class YouScreen extends ConsumerStatefulWidget {
   const YouScreen({super.key});
   @override
-  State<YouScreen> createState() => _YouScreenState();
+  ConsumerState<YouScreen> createState() => _YouScreenState();
 }
 
-class _YouScreenState extends State<YouScreen> {
+class _YouScreenState extends ConsumerState<YouScreen> {
   int _currentPhaseLevel = 0;
 
   @override
@@ -47,6 +49,21 @@ class _YouScreenState extends State<YouScreen> {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getInt('current_phase_level') ?? 0;
     if (mounted) setState(() => _currentPhaseLevel = saved);
+  }
+
+  /// Map phase name from API → level index
+  static int _getPhaseLevelFromName(String? phaseName) {
+    if (phaseName == null) return 0;
+    final lower = phaseName.toLowerCase();
+    for (int i = 0; i < _phaseNames.length; i++) {
+      if (_phaseNames[i].toLowerCase() == lower) return i;
+    }
+    if (lower.contains('beginner') || lower.contains('activation')) return 0;
+    if (lower.contains('fat')) return 1;
+    if (lower.contains('metabolic')) return 2;
+    if (lower.contains('transformation')) return 3;
+    if (lower.contains('limit')) return 4;
+    return 0;
   }
 
   static const List<String> _phaseNames = [
@@ -64,6 +81,24 @@ class _YouScreenState extends State<YouScreen> {
     final name = profile?['name'] ?? 'Guest';
     final email = profile?['email'] ?? '';
     final initial = name.isNotEmpty ? name[0].toUpperCase() : 'G';
+
+    // Read phase from backend progress API (same source as dashboard)
+    final progress = ref.watch(dashboardProvider).progressData;
+    final backendPhaseName = progress?['currentPhaseName']?.toString();
+    final backendPhaseGoal = (progress?['currentPhaseGoal'] as num?)?.toInt();
+    final effectivePhaseLevel = backendPhaseName != null
+        ? _getPhaseLevelFromName(backendPhaseName)
+        : _currentPhaseLevel;
+    // Use backend phase name directly for display (not the hardcoded array)
+    final displayPhaseName = backendPhaseName ?? _phaseNames[effectivePhaseLevel.clamp(0, 4)];
+
+    // Update SharedPreferences if backend disagrees with local cache
+    if (backendPhaseName != null && effectivePhaseLevel != _currentPhaseLevel) {
+      _currentPhaseLevel = effectivePhaseLevel;
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setInt('current_phase_level', effectivePhaseLevel);
+      });
+    }
 
     final phaseData = [
       {'icon': Icons.rocket_launch_rounded,         'name': 'Fat Gain',             'range': '0 – 5,000 steps',       'color': const Color(0xFF4FC3F7), 'level': 0},
@@ -148,7 +183,7 @@ class _YouScreenState extends State<YouScreen> {
                               border: Border.all(color: _C.accent.withOpacity(0.3)),
                             ),
                             child: Text(
-                              _phaseNames[_currentPhaseLevel.clamp(0, 4)],
+                              displayPhaseName,
                               style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: _C.accent, letterSpacing: 0.3),
                             ),
                           ),
@@ -169,8 +204,8 @@ class _YouScreenState extends State<YouScreen> {
                     // ── Phase Cards ──
                     ...phaseData.map((phase) {
                       final level = phase['level'] as int;
-                      final isCurrent = level == _currentPhaseLevel;
-                      final isCompleted = level < _currentPhaseLevel;
+                      final isCurrent = level == effectivePhaseLevel;
+                      final isCompleted = level < effectivePhaseLevel;
                       final phaseColor = phase['color'] as Color;
 
                       return Container(

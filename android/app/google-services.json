@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "669236338298",
+    "project_id": "theeasyfitclinics-dbd1b",
+    "storage_bucket": "theeasyfitclinics-dbd1b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:669236338298:android:cc00afcc2f096a10e825c3",
+        "android_client_info": {
+          "package_name": "com.theeasyfitclinics.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA80aFveQBPkH2s7hI9ngUw76tmMnojXqA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
