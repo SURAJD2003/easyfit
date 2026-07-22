@@ -11,6 +11,7 @@ import '../../data/repositories/admin_repository_impl.dart';
 import '../../data/models/subscription_model.dart';
 import '../../domain/entities/index.dart';
 import '../../domain/usecases/index.dart';
+import '../../../../services/push_notification_service.dart';
 
 // ─── STATE CLASSES ───────────────────────────────────────────────────────────
 
@@ -338,6 +339,7 @@ class AdminProvider extends ChangeNotifier {
         debugPrint('Failed to stop background service: $e');
       }
       
+      PushNotificationService().registerTokenWithBackend();
       notifyListeners();
       return true;
     } catch (e) {
@@ -382,6 +384,7 @@ class AdminProvider extends ChangeNotifier {
         debugPrint('Failed to stop background service: $e');
       }
       
+      PushNotificationService().registerTokenWithBackend();
       notifyListeners();
     }
   }
