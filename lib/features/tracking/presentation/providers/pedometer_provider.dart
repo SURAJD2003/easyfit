@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -30,6 +31,8 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
   bool _isTracking = false;
   int _lastHour = -1;         // for hourly step tracking
   int _stepsAtHourStart = 0;  // steps when current hour started
+  int _lastHourlyTotal = -1;  // previous total used for hourly delta allocation
+  DateTime? _lastHourlyEventTime;
   int _sessionGeneration = 0;  // invalidates delayed syncs from older sessions
 
   // Riverpod ref for milestone updates
@@ -106,14 +109,9 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
           final prefs = await SharedPreferences.getInstance();
           final sessionId = prefs.getString('active_session_id') ?? '';
           if (sessionId.isNotEmpty) {
-            final calories = (currentTotal * 0.045).round();
-            final distance = double.parse((currentTotal * 0.000762).toStringAsFixed(3));
-            await repo.syncSteps(
-              sessionId: sessionId,
-              steps: currentTotal,
-              calories: calories,
-              distance: distance,
-            );
+            // FIX: Use hourly replay instead of single-timestamp
+            // sync, which would dump all steps into a single hour.
+            await repo.replayHourlyBuckets(sessionId);
           }
         } catch (e) {
           debugPrint('⚠️ Final sync for old day failed: $e');
@@ -125,6 +123,10 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
       _baseSteps = -1;
       _lastSyncedSteps = 0;
       _lastMilestone = 0;
+      _lastHour = -1;
+      _stepsAtHourStart = 0;
+      _lastHourlyTotal = -1;
+      _lastHourlyEventTime = null;
       _sessionDate = today;
       state = const AsyncValue.data(0);
       
@@ -132,6 +134,11 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('session_accumulated_steps', 0);
       await prefs.setString('session_date', today);
+      final sessionId = prefs.getString('active_session_id') ?? '';
+      if (sessionId.isNotEmpty) {
+        await prefs.remove('hourly_raw_steps_$sessionId');
+        await prefs.remove('hourly_event_time_$sessionId');
+      }
       
       debugPrint('✅ Steps reset to 0 for new day: $today');
     }
@@ -165,6 +172,10 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
     _accumulatedSteps = 0;
     _lastSyncedSteps = 0;
     _lastMilestone = 0;
+    _lastHour = -1;
+    _stepsAtHourStart = 0;
+    _lastHourlyTotal = -1;
+    _lastHourlyEventTime = null;
     _sessionDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
     state = const AsyncValue.data(0);
     // Persist initial state
@@ -245,12 +256,19 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
     _lastMilestone = 0;
     _lastHour = -1;
     _stepsAtHourStart = 0;
+    _lastHourlyTotal = -1;
+    _lastHourlyEventTime = null;
     _sessionDate = today;
     state = const AsyncValue.data(0);
     // Persist the reset
     SharedPreferences.getInstance().then((prefs) {
       prefs.setInt('session_accumulated_steps', 0);
       prefs.setString('session_date', today);
+      final activeSessionId = prefs.getString('active_session_id') ?? '';
+      if (activeSessionId.isNotEmpty) {
+        prefs.remove('hourly_raw_steps_$activeSessionId');
+        prefs.remove('hourly_event_time_$activeSessionId');
+      }
     });
   }
 
@@ -278,17 +296,15 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
         // Persist every step for crash recovery
         _persistSteps(totalSessionSteps);
         
-        // Also write to completed_steps_today so BG notification + stats screen
-        // always have the latest foreground total
+        // Keep the latest real step timestamp for sync attribution. Do not write
+        // active-session steps into completed_steps_today; dashboard adds
+        // completed + live, so doing that here double-counts the active session.
         SharedPreferences.getInstance().then((prefs) {
-          final existing = prefs.getInt('completed_steps_today') ?? 0;
-          if (totalSessionSteps > existing) {
-            prefs.setInt('completed_steps_today', totalSessionSteps);
-          }
+          prefs.setString('last_step_timestamp', DateTime.now().toIso8601String());
         });
 
         // ── Track per-hour steps ──
-        _updateHourlySteps(totalSessionSteps);
+        _updateHourlySteps(totalSessionSteps, event.steps);
 
         // Check for milestone celebrations (every 1000 steps)
         _checkMilestone(totalSessionSteps);
@@ -324,25 +340,131 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
   }
 
   /// Update per-hour step counts in SharedPreferences
-  void _updateHourlySteps(int totalSteps) {
-    final nowHour = DateTime.now().hour;
-    if (_lastHour == -1) {
-      _lastHour = nowHour;
+  void _updateHourlySteps(int totalSteps, int rawSensorSteps) {
+    final now = DateTime.now();
+    if (_lastHourlyTotal == -1 || _lastHourlyEventTime == null) {
+      _lastHourlyTotal = totalSteps;
+      _lastHourlyEventTime = now;
+      _lastHour = now.hour;
       _stepsAtHourStart = totalSteps;
     }
-    if (nowHour != _lastHour) {
-      _stepsAtHourStart = totalSteps;
-      _lastHour = nowHour;
+
+    final previousEventTime = _lastHourlyEventTime!;
+    _lastHourlyTotal = totalSteps;
+    _lastHourlyEventTime = now;
+    _lastHour = now.hour;
+
+    SharedPreferences.getInstance().then((prefs) async {
+      final activeSessionId = prefs.getString('active_session_id') ?? '';
+      if (activeSessionId.isEmpty || activeSessionId.startsWith('local_')) {
+        return;
+      }
+
+      final service = FlutterBackgroundService();
+      final isBackgroundRunning = await service.isRunning();
+      if (isBackgroundRunning) {
+        debugPrint(
+          '⏭️ FG hourly skipped: background service owns hourly buckets '
+          '(session=$activeSessionId, raw=$rawSensorSteps)',
+        );
+        return;
+      }
+
+      final rawKey = 'hourly_raw_steps_$activeSessionId';
+      final timeKey = 'hourly_event_time_$activeSessionId';
+      final previousRaw = prefs.getInt(rawKey);
+      final storedPreviousTime =
+          DateTime.tryParse(prefs.getString(timeKey) ?? '');
+      await prefs.setInt(rawKey, rawSensorSteps);
+      await prefs.setString(timeKey, now.toIso8601String());
+
+      if (previousRaw == null) {
+        debugPrint(
+          '🧭 FG hourly initialized: session=$activeSessionId, raw=$rawSensorSteps',
+        );
+        return;
+      }
+
+      final rawDelta = rawSensorSteps - previousRaw;
+      if (rawDelta <= 0 || rawDelta >= 1000) {
+        debugPrint(
+          '⏭️ FG hourly ignored delta: session=$activeSessionId, '
+          'previousRaw=$previousRaw, raw=$rawSensorSteps, delta=$rawDelta',
+        );
+        return;
+      }
+
+      _writeDeltaAcrossHours(
+        prefs: prefs,
+        sessionId: activeSessionId,
+        delta: rawDelta,
+        from: storedPreviousTime ?? previousEventTime,
+        to: now,
+        source: 'FG',
+      );
+    });
+  }
+
+  void _writeDeltaAcrossHours({
+    required SharedPreferences prefs,
+    required String sessionId,
+    required int delta,
+    required DateTime from,
+    required DateTime to,
+    required String source,
+  }) {
+    if (delta <= 0) return;
+    if (!to.isAfter(from) || from.hour == to.hour && _isSameDay(from, to)) {
+      _addHourlyDelta(prefs, sessionId, to.hour, delta, source);
+      return;
     }
-    final hourDelta = totalSteps - _stepsAtHourStart;
-    if (hourDelta > 0) {
-      SharedPreferences.getInstance().then((prefs) {
-        final prev = prefs.getInt('hourly_steps_$nowHour') ?? 0;
-        if (hourDelta > prev) {
-          prefs.setInt('hourly_steps_$nowHour', hourDelta);
-        }
-      });
+
+    final boundary = DateTime(to.year, to.month, to.day, to.hour);
+    if (boundary.isAfter(from) && boundary.isBefore(to)) {
+      final totalMs = to.difference(from).inMilliseconds;
+      final previousMs =
+          boundary.difference(from).inMilliseconds.clamp(0, totalMs).toInt();
+      final previousDelta =
+          ((delta * previousMs) / totalMs).round().clamp(0, delta).toInt();
+      final currentDelta = delta - previousDelta;
+      if (previousDelta > 0) {
+        _addHourlyDelta(prefs, sessionId, from.hour, previousDelta, source);
+      }
+      if (currentDelta > 0) {
+        _addHourlyDelta(prefs, sessionId, to.hour, currentDelta, source);
+      }
+      debugPrint(
+        '🧮 HOURLY BOUNDARY SPLIT $source: session=$sessionId, '
+        'from=${from.toIso8601String()}, to=${to.toIso8601String()}, '
+        'delta=$delta, prevHour=${from.hour}:$previousDelta, currentHour=${to.hour}:$currentDelta',
+      );
+      return;
     }
+
+    _addHourlyDelta(prefs, sessionId, to.hour, delta, source);
+  }
+
+  void _addHourlyDelta(
+    SharedPreferences prefs,
+    String sessionId,
+    int hour,
+    int delta,
+    String source,
+  ) {
+    final prev = prefs.getInt('hourly_steps_$hour') ?? 0;
+    final sessionKey = 'hourly_steps_${sessionId}_$hour';
+    final prevSession = prefs.getInt(sessionKey) ?? 0;
+    prefs.setInt('hourly_steps_$hour', prev + delta);
+    prefs.setInt(sessionKey, prevSession + delta);
+    debugPrint(
+      '🧭 HOURLY BUCKET WRITE $source: session=$sessionId, '
+      'hour=$hour, delta=$delta, sessionHourBefore=$prevSession, '
+      'sessionHourAfter=${prevSession + delta}',
+    );
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
   void _syncWithServerThrottled(int sessionSteps) {
@@ -360,18 +482,30 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
           final prefs = await SharedPreferences.getInstance();
           final sessionId = prefs.getString('active_session_id') ?? '';
           if (sessionId.isNotEmpty && _isTracking && scheduledGeneration == _sessionGeneration) {
-            final calories = (sessionSteps * 0.045).round();
-            final distance = double.parse((sessionSteps * 0.000762).toStringAsFixed(3));
-            await repo.syncSteps(
-                sessionId: sessionId,
-                steps: sessionSteps,
-                calories: calories,
-                distance: distance);
-            _lastSyncedSteps = sessionSteps;
-            debugPrint('✅ FG Sync: $sessionSteps steps');
+            final storedSessionSteps = prefs.getInt('session_accumulated_steps') ?? 0;
+            final stepsToSync = sessionSteps > storedSessionSteps ? sessionSteps : storedSessionSteps;
+            debugPrint(
+              '🔎 FG SYNC RECONCILE: session=$sessionId, '
+              'sessionSteps=$sessionSteps, storedSessionSteps=$storedSessionSteps, '
+              'stepsToSync=$stepsToSync, lastSynced=$_lastSyncedSteps',
+            );
+            if (stepsToSync > sessionSteps) {
+              _accumulatedSteps = stepsToSync;
+              _baseSteps = -1;
+              state = AsyncValue.data(stepsToSync);
+              debugPrint('🔄 FG sync caught up from background: $sessionSteps → $stepsToSync');
+            }
+            // ═══════════════════════════════════════════════════
+            // FIX: Use hourly replay instead of single-timestamp
+            //   sync. Sending ALL steps with current timestamp
+            //   overwrites the per-hour distribution.
+            // ═══════════════════════════════════════════════════
+            await repo.replayHourlyBuckets(sessionId);
+            _lastSyncedSteps = stepsToSync;
+            debugPrint('✅ FG Sync: $stepsToSync steps (via hourly replay)');
           }
         } catch (e) {
-           debugPrint('❌ FG Sync failed: $e');
+          debugPrint('❌ FG Sync failed: $e');
         }
       });
     }

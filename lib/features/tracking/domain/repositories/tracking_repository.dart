@@ -13,6 +13,7 @@ abstract class TrackingRepository {
     required double finalDistance,
   });
   Future<Map<String, dynamic>> getSessionById(String id);
-  Future<void> syncSteps({required String sessionId, required int steps, required int calories, required double distance});
+  Future<void> syncSteps({required String sessionId, required int steps, required int calories, required double distance, String? customTimestamp});
+  Future<void> replayHourlyBuckets(String sessionId);
   Future<Map<String, dynamic>> getActivityProgress();
 }

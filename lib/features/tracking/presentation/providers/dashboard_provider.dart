@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/datasources/activity_remote_datasource.dart';
 import '../../data/repositories/tracking_repository_impl.dart';
 import '../../domain/repositories/tracking_repository.dart';
@@ -56,10 +57,27 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
       }
       
       final today = await repo.getTodayActivity();
+      await _persistTodayApiSteps(today, localToday);
       if (mounted) {
         state = state.copyWith(todayActivity: today);
       }
       print('🔄 Auto-refreshed today: $today');
+      
+      // Debug: also fetch hourly stats so we can see without tapping Stats
+      try {
+        final hourly = await repo.getDailyStats(date: localToday);
+        final hours = hourly['hours'] as List? ?? [];
+        final activeHours = hours.where((h) => h['hasActivity'] == true).toList();
+        if (activeHours.isNotEmpty) {
+          print('═══════════════════════════════════════════');
+          print('📊 HOURLY STATS (live, no session stop needed):');
+          print('   Total steps from hourly: ${hourly['totalSteps']}');
+          for (final h in activeHours) {
+            print('   ${h['label']}: ${h['steps']} steps');
+          }
+          print('═══════════════════════════════════════════');
+        }
+      } catch (_) {}
     } catch (e) {
       print('❌ Auto-refresh error: $e');
     }
@@ -91,6 +109,7 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
     
     try { 
       today = await repo.getTodayActivity(); 
+      await _persistTodayApiSteps(today, localToday);
       print('📊 TODAY API response: $today');
     } catch (e) { print('❌ TODAY API error: $e'); }
     
@@ -137,6 +156,15 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
       error: null,
     );
     print('📊 Final DashboardState → today: ${state.todayActivity}, weekly: ${state.weeklyStats}, progress: ${state.progressData}');
+  }
+
+  /// Fetch weekly stats for a specific date range
+  Future<void> _persistTodayApiSteps(Map<String, dynamic>? today, String date) async {
+    final steps = (today?['steps'] as num?)?.toInt();
+    if (steps == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('last_known_today_api_steps', steps);
+    await prefs.setString('last_known_today_api_date', date);
   }
 
   /// Fetch weekly stats for a specific date range

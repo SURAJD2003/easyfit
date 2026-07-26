@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/api_client.dart';
 import '../services/auth_service.dart';
+import '../services/fcm_service.dart';
 import '../models/auth/register_request.dart';
 import '../models/auth/register_response.dart';
 import '../models/auth/login_request.dart';
@@ -202,6 +203,7 @@ class AuthProvider extends ChangeNotifier {
       ApiClient().setToken(_token!);
       _status = AuthStatus.success;
       unawaited(fetchProfile()); // fetch profile quietly in background
+      unawaited(FcmService().registerToken()); // register FCM token with backend
     }
     notifyListeners();
   }
@@ -237,6 +239,9 @@ class AuthProvider extends ChangeNotifier {
         await prefs.setString('auth_refresh_token', _refreshToken!);
 
       await fetchProfile();
+
+      // Register FCM token with backend now that we have auth
+      unawaited(FcmService().registerToken());
     } else {
       _errorMessage = result.error?.message ?? 'Registration failed';
       _status = AuthStatus.error;
@@ -265,6 +270,9 @@ class AuthProvider extends ChangeNotifier {
         await prefs.setString('auth_refresh_token', _refreshToken!);
 
       await fetchProfile();
+
+      // Register FCM token with backend now that we have auth
+      unawaited(FcmService().registerToken());
     } else {
       _errorMessage = result.error?.message ?? 'Login failed';
       _status = AuthStatus.error;

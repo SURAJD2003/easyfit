@@ -1592,16 +1592,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       if (activeSessionId.isEmpty || activeSessionId.startsWith('local_')) return;
       
       final repo = ref.read(trackingRepositoryProvider);
-      final cals = (missingSteps * 0.045).toInt();
-      final dist = double.parse((missingSteps * 0.000762).toStringAsFixed(3));
       
-      await repo.syncSteps(
-        sessionId: activeSessionId,
-        steps: missingSteps,
-        calories: cals,
-        distance: dist,
-      );
-      debugPrint('✅ Catch-up sync pushed $missingSteps steps on session $activeSessionId');
+      // FIX: Use hourly replay instead of sending all steps with current
+      // timestamp, which would dump everything into the current hour.
+      await repo.replayHourlyBuckets(activeSessionId);
+      debugPrint('✅ Catch-up sync pushed $missingSteps steps on session $activeSessionId (via hourly replay)');
       
       // Refresh dashboard to reflect updated backend total
       ref.read(dashboardProvider.notifier).refreshToday();
@@ -2056,17 +2051,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           debugPrint('📊 Silent sync: sessionSteps=$sessionSteps, liveDisplay=$livePedometerSteps, cached=$_lastCompletedSteps, catchup=$_pendingCatchupSteps, final=$finalSteps');
           _pendingCatchupSteps = 0; // consumed
           
-          // SYNC first — ensures backend has latest steps even if stopSession fails
+          // Replay hourly buckets before stopping
           try {
-            await repo.syncSteps(
-              sessionId: sessionIdToStop,
-              steps: finalSteps,
-              calories: finalCalories,
-              distance: finalDistance,
-            );
-            debugPrint('✅ Pre-stop sync sent: $finalSteps steps');
+            await repo.replayHourlyBuckets(sessionIdToStop);
           } catch (e) {
-            debugPrint('⚠️ Pre-stop sync failed: $e');
+            debugPrint('⚠️ Pre-stop hourly replay failed: $e');
           }
           
           // STOP session → commits to backend stats/reports
@@ -2182,17 +2171,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           }
           _pendingCatchupSteps = 0; // consumed
           
-          // SYNC first — ensures backend has latest steps even if stopSession fails
+          // Replay hourly buckets before stopping
           try {
-            await repo.syncSteps(
-              sessionId: sessionIdToStop,
-              steps: finalSteps,
-              calories: finalCalories,
-              distance: finalDistance,
-            );
-            debugPrint('✅ Pre-stop tab sync sent: $finalSteps steps');
+            await repo.replayHourlyBuckets(sessionIdToStop);
           } catch (e) {
-            debugPrint('⚠️ Pre-stop tab sync failed: $e');
+            debugPrint('⚠️ Pre-stop tab hourly replay failed: $e');
           }
           
           // STOP session
@@ -2393,7 +2376,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       ),
       body: SafeArea(bottom: false, child: _body(state, sessionSteps)),
       bottomNavigationBar: _bottomPill(),
-      // FAB only on Home tab
       floatingActionButton: null,
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
     );
@@ -4666,12 +4648,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               debugPrint('📊 Stop: live=$livePedometerSteps, api=${prevApiSteps.toInt()}, bg=$bgAccumulatedSteps, final=$finalSteps, display=$_lastCompletedSteps');
               
               try {
-                await repo.syncSteps(
-                  sessionId: sessionIdToStop,
-                  steps: finalSteps,
-                  calories: finalCalories,
-                  distance: finalDistance,
-                );
+                await repo.replayHourlyBuckets(sessionIdToStop);
                 await repo.stopSession(
                   sessionId: sessionIdToStop,
                   finalSteps: finalSteps,

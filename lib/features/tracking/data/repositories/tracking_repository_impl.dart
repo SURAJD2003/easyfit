@@ -57,8 +57,13 @@ class TrackingRepositoryImpl implements TrackingRepository {
   }
 
   @override
-  Future<void> syncSteps({required String sessionId, required int steps, required int calories, required double distance}) {
-    return remoteDatasource.syncSteps(sessionId: sessionId, steps: steps, calories: calories, distance: distance);
+  Future<void> syncSteps({required String sessionId, required int steps, required int calories, required double distance, String? customTimestamp}) {
+    return remoteDatasource.syncSteps(sessionId: sessionId, steps: steps, calories: calories, distance: distance, customTimestamp: customTimestamp);
+  }
+
+  @override
+  Future<void> replayHourlyBuckets(String sessionId) {
+    return remoteDatasource.replayHourlyBuckets(sessionId);
   }
 
   @override

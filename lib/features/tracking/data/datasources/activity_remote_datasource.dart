@@ -1,7 +1,8 @@
 import 'dart:convert';
-import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/api_client.dart';
 import '../../../../core/api_constants.dart';
 
@@ -104,15 +105,29 @@ class ActivityRemoteDatasource {
     required int finalCalories,
     required double finalDistance,
   }) async {
+      final endTime = DateTime.now().toIso8601String();
       final stopData = {
         'sessionId': sessionId,
-        'endTime': DateTime.now().toIso8601String(),
+        'endTime': endTime,
         'finalSteps': finalSteps,
         'finalCalories': finalCalories,
         'finalDistance': finalDistance,
       };
       
-      print('\n🚀 REALTIME STOP SESSION JSON:\n${jsonEncode(stopData)}\n');
+      try {
+        final parsedTime = DateTime.parse(endTime);
+        final hourBucket = '${parsedTime.hour}:00 - ${parsedTime.hour + 1}:00';
+        debugPrint('');
+        debugPrint('═══════════════════════════════════════════');
+        debugPrint('🔬 STOP SESSION DEBUG (Datasource):');
+        debugPrint('   🛑 Stopping session: $sessionId');
+        debugPrint('   📊 Final steps sent: $finalSteps');
+        debugPrint('   ⏰ endTime sent: $endTime');
+        debugPrint('   🪣 Target bucket of endTime: $hourBucket');
+        debugPrint('   📋 Full Stop payload: ${jsonEncode(stopData)}');
+        debugPrint('═══════════════════════════════════════════');
+        debugPrint('');
+      } catch (_) {}
 
       final response = await _dio.patch(
         ApiConstants.activitySessionStop,
@@ -127,17 +142,86 @@ class ActivityRemoteDatasource {
     required int steps,
     required int calories,
     required double distance,
+    String? customTimestamp,
   }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final stepTime = customTimestamp ?? prefs.getString('last_step_timestamp') ?? DateTime.now().toIso8601String();
+    final payload = {
+      'sessionId': sessionId,
+      'steps': steps,
+      'calories': calories,
+      'distance': distance,
+      'timestamp': stepTime,
+    };
+    
+    // ═══ HEAVY DEBUG: SYNC STEPS ═══
+    try {
+      final parsedTime = DateTime.parse(stepTime);
+      final hourBucket = '${parsedTime.hour}:00 - ${parsedTime.hour + 1}:00';
+      debugPrint('');
+      debugPrint('═══════════════════════════════════════════');
+      debugPrint('🔬 SYNC DEBUG (foreground datasource):');
+      debugPrint('   📤 Sending $steps steps to backend');
+      debugPrint('   ⏰ Timestamp: $stepTime');
+      debugPrint('   🪣 Hour bucket: $hourBucket');
+      debugPrint('   🔑 Session: $sessionId');
+      debugPrint('   📋 Full payload: ${jsonEncode(payload)}');
+      debugPrint('═══════════════════════════════════════════');
+      debugPrint('');
+    } catch (_) {}
+    
     await _dio.post(
       ApiConstants.activitySync,
-      data: {
-        'sessionId': sessionId,
-        'steps': steps,
-        'calories': calories,
-        'distance': distance,
-        'timestamp': DateTime.now().toIso8601String(),
-      },
+      data: payload,
     );
+  }
+
+  /// Replay local hourly step buckets to the backend as timestamped cumulative syncs
+  Future<void> replayHourlyBuckets(String sessionId) async {
+    if (sessionId.isEmpty || sessionId.startsWith('local_')) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final now = DateTime.now();
+    final todayStr = DateFormat('yyyy-MM-dd').format(now);
+    int cumulativeSteps = 0;
+    int replayedCount = 0;
+
+    debugPrint('');
+    debugPrint('═══════════════════════════════════════════');
+    debugPrint('🔄 STARTING HOURLY REPLAY FOR SESSION: $sessionId');
+
+    for (int h = 0; h <= now.hour; h++) {
+      final bucketKey = 'hourly_steps_${sessionId}_$h';
+      final hourSteps = prefs.getInt(bucketKey) ?? 0;
+      if (hourSteps > 0) {
+        cumulativeSteps += hourSteps;
+        final calories = (cumulativeSteps * 0.045).round();
+        final distance = double.parse((cumulativeSteps * 0.000762).toStringAsFixed(3));
+        final hourPad = h.toString().padLeft(2, '0');
+        final customTimestamp = '${todayStr}T$hourPad:59:59.000';
+
+        debugPrint('   👉 Replaying Hour $h ($hourSteps steps -> cumulative $cumulativeSteps) @ $customTimestamp');
+
+        try {
+          await syncSteps(
+            sessionId: sessionId,
+            steps: cumulativeSteps,
+            calories: calories,
+            distance: distance,
+            customTimestamp: customTimestamp,
+          );
+          replayedCount++;
+        } catch (e) {
+          debugPrint('   ⚠️ Replay failed for hour $h: $e');
+        }
+      } else {
+        debugPrint('   ⏭️ Replay skip hour $h: $bucketKey has 0 steps');
+      }
+    }
+
+    debugPrint('✅ HOURLY REPLAY COMPLETE: Replayed $replayedCount buckets (Total cumulative: $cumulativeSteps steps)');
+    debugPrint('═══════════════════════════════════════════');
+    debugPrint('');
   }
 
   // GET /activity/stats/monthly?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD

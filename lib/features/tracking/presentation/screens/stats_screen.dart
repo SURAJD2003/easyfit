@@ -75,6 +75,9 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
   int get _todaySteps {
     final apiSteps = (_todayData?['steps'] ?? 0) as int;
     final pedometerSteps = ref.watch(pedometerProvider).valueOrNull ?? 0;
+    if (pedometerSteps == 0 && apiSteps > 0 && _cachedCompletedSteps > apiSteps) {
+      return apiSteps;
+    }
     final liveDailyTotal = _cachedCompletedSteps + pedometerSteps;
     return math.max(apiSteps, liveDailyTotal);
   }
@@ -106,6 +109,17 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
     final repo = ref.read(trackingRepositoryProvider);
     final today = DateTime.now().toIso8601String().split('T')[0];
 
+    // Replay local hourly buckets to ensure backend has all hourly timestamps
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final activeSessionId = prefs.getString('active_session_id') ?? '';
+      if (activeSessionId.isNotEmpty) {
+        await repo.replayHourlyBuckets(activeSessionId);
+      }
+    } catch (e) {
+      debugPrint('⚠️ [StatsScreen] Hourly replay error: $e');
+    }
+
     debugPrint('📊 [StatsScreen] Loading hourly steps from API for $today');
 
     try {
@@ -121,21 +135,25 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
         return;
       }
 
+      debugPrint('');
+      debugPrint('═══════════════════════════════════════════');
+      debugPrint('🔬 STATS SCREEN HOURLY RESPONSE FROM BACKEND:');
+      debugPrint('   Date: $today');
+      debugPrint('   Total steps reported by API: ${data['totalSteps']}');
+      
       final List<double> hourly = List.filled(24, 0.0);
       for (final h in hours) {
         final hourIndex = (h['hour'] as num?)?.toInt() ?? -1;
         final steps = (h['steps'] as num?)?.toDouble() ?? 0.0;
-        debugPrint('📊 [StatsScreen] Hour $hourIndex (${h['label']}): $steps steps, hasActivity=${h['hasActivity']}');
         if (hourIndex >= 0 && hourIndex < 24) {
           hourly[hourIndex] = steps;
+          if (steps > 0 || (h['hasActivity'] == true)) {
+            debugPrint('   👉 Bucket Hour $hourIndex (${h['label']}): $steps steps (hasActivity=${h['hasActivity']})');
+          }
         }
       }
-
-      final peakHour = data['peakHour'];
-      if (peakHour != null) {
-        debugPrint('📊 [StatsScreen] Peak hour: ${peakHour['label']} with ${peakHour['steps']} steps');
-      }
-      debugPrint('📊 [StatsScreen] Total steps from daily API: ${data['totalSteps']}');
+      debugPrint('═══════════════════════════════════════════');
+      debugPrint('');
 
       if (mounted) setState(() => _hourlySteps = hourly);
     } catch (e) {
@@ -231,17 +249,16 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
       return ['TODAY'];
     }
     if (_tabIndex == 1) {
-      // Week: last 8 weeks — THIS WEEK first, then older
-      DateTime ws = now.subtract(Duration(days: now.weekday - 1)); // this week's Monday
+      // Week: rolling 7-day windows — LAST 7 DAYS first, then older
       final List<String> pills = [];
       for (int i = 0; i < 8; i++) {
-        final we = ws.add(const Duration(days: 6));
+        final we = now.subtract(Duration(days: 7 * i));
+        final ws = we.subtract(const Duration(days: 6));
         if (i == 0) {
-          pills.add('THIS WEEK');
+          pills.add('LAST 7 DAYS');
         } else {
           pills.add('${DateFormat('d MMM').format(ws).toUpperCase()} – ${DateFormat('d MMM').format(we).toUpperCase()}');
         }
-        ws = ws.subtract(const Duration(days: 7));
       }
       return pills;
     }
@@ -262,12 +279,10 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
       return;
     }
     if (_tabIndex == 1) {
-      // Week: calculate which week is selected
-      // pills go: [THIS WEEK, 1 week ago, 2 weeks ago, ...]
+      // Week: rolling 7-day windows (today and 6 days back)
       final weeksBack = _selectedPeriod;
-      DateTime ws = now.subtract(Duration(days: now.weekday - 1)); // this Monday
-      ws = ws.subtract(Duration(days: 7 * weeksBack));
-      final we = ws.add(const Duration(days: 6));
+      final we = now.subtract(Duration(days: 7 * weeksBack));
+      final ws = we.subtract(const Duration(days: 6));
       notifier.fetchWeeklyStats(ws, we);
       return;
     }
@@ -384,11 +399,24 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
       }).whereType<Map<String, String>>().toList();
     }
     if (_tabIndex == 1) {
+      final weekly = state.weeklyStats;
+      final days = (weekly?['days'] as List?) ?? [];
       final bars = _stepBars;
-      return List.generate(bars.length, (i) {
+      final now = DateTime.now();
+      final items = List.generate(bars.length, (i) {
         if (bars[i] == 0) return null;
-        return {'val': formatVal(bars[i]), 'sub': weekDays[i], 'id': ''};
+        String dayName = 'Day ${i + 1}';
+        bool isToday = false;
+        if (i < days.length && days[i]['date'] != null) {
+          try {
+            final dt = DateTime.parse(days[i]['date'] as String);
+            isToday = (dt.year == now.year && dt.month == now.month && dt.day == now.day);
+            dayName = isToday ? '${DateFormat('E').format(dt)} (Today)' : DateFormat('E').format(dt);
+          } catch (_) {}
+        }
+        return {'val': formatVal(bars[i]), 'sub': dayName, 'id': '', 'isToday': isToday ? 'true' : 'false'};
       }).whereType<Map<String, String>>().toList();
+      return items.reversed.toList();
     }
     // Month: show weekly breakdown
     final monthly = state.monthlyStats;
@@ -411,6 +439,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
   void initState() {
     super.initState();
     _selectedPeriod = 0; // Start on THIS WEEK / TODAY / current month
+    _hourlyLoaded = false; // Always reload hourly data when stats screen opens
     _loadPhaseLevel(); // load persisted phase level
     _loadCache(); // load completed steps for MAX formula
     // Trigger a fresh API fetch, then load correct data for the selected period
@@ -711,7 +740,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
           ),
           const SizedBox(height: 20),
           if (_listTab == 0)
-            ..._listItems.map((item) => _listItem(item['val']!, item['sub']!, item['id']!))
+            ..._listItems.map((item) => _listItem(item['val']!, item['sub']!, item['id']!, isToday: item['isToday'] == 'true'))
           else
             if (_listItems.isEmpty)
               Center(
@@ -722,7 +751,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
                 ),
               )
             else
-              ..._listItems.map((item) => _listItem(item['val']!, item['sub']!, item['id']!))
+              ..._listItems.map((item) => _listItem(item['val']!, item['sub']!, item['id']!, isToday: item['isToday'] == 'true'))
         ],
       ),
     );
@@ -750,7 +779,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
     );
   }
 
-  Widget _listItem(String val, String sub, String id) {
+  Widget _listItem(String val, String sub, String id, {bool isToday = false}) {
     return GestureDetector(
       onTap: () async {
         if (id.isEmpty) return;
@@ -777,8 +806,8 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
             width: 46, height: 46,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: _chartColor.withOpacity(0.1),
-              border: Border.all(color: _chartColor.withOpacity(0.4)),
+              color: isToday ? _T.accent.withOpacity(0.2) : _chartColor.withOpacity(0.1),
+              border: Border.all(color: isToday ? _T.accent : _chartColor.withOpacity(0.4), width: isToday ? 1.5 : 1.0),
             ),
             child: Icon(
               _activeCard == 1
@@ -786,7 +815,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
                   : _activeCard == 2
                       ? Icons.local_fire_department_rounded
                       : Icons.directions_walk_rounded,
-              color: _chartColor, size: 22,
+              color: isToday ? _T.accent : _chartColor, size: 22,
             ),
           ),
           const SizedBox(width: 14),
@@ -798,7 +827,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
               )),
               const SizedBox(height: 3),
               Text(sub, style: GoogleFonts.inter(
-                fontSize: 12, color: _T.mid,
+                fontSize: 12, color: isToday ? _T.accent : _T.mid, fontWeight: isToday ? FontWeight.w600 : FontWeight.w400,
               )),
             ],
           ),

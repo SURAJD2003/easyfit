@@ -67,10 +67,24 @@ void onStart(ServiceInstance service) async {
     
     // dashboardSteps is the day's total before the current session started
     final prefs = await SharedPreferences.getInstance();
-    final dashboardSteps = prefs.getInt('completed_steps_today') ?? 0;
+    await prefs.reload();
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final completedDate = prefs.getString('completed_steps_date') ?? '';
+    final dashboardSteps = completedDate == today ? (prefs.getInt('completed_steps_today') ?? 0) : 0;
+    final apiDate = prefs.getString('last_known_today_api_date') ?? '';
+    final apiSteps = apiDate == today ? (prefs.getInt('last_known_today_api_steps') ?? 0) : 0;
     
-    // Display the daily total to the user in the notification
-    final totalDailySteps = dashboardSteps + bgSteps;
+    // Display the same guarded daily total as the dashboard.
+    final localDailySteps = dashboardSteps + bgSteps;
+    final totalDailySteps = bgSteps == 0 && apiSteps > 0 && dashboardSteps > apiSteps
+        ? apiSteps
+        : (apiSteps > localDailySteps ? apiSteps : localDailySteps);
+    debugPrint(
+      '🔔 NOTIFICATION TOTAL DEBUG: session=$boundSessionId, '
+      'completed=$dashboardSteps(date=$completedDate), bgSteps=$bgSteps, '
+      'api=$apiSteps(date=$apiDate), localDaily=$localDailySteps, '
+      'shown=$totalDailySteps',
+    );
     
     final elapsed = DateTime.now().difference(sessionStart);
     final duration = _formatDuration(elapsed);
@@ -178,8 +192,8 @@ void onStart(ServiceInstance service) async {
       await prefs.setString('session_date', today);
       await prefs.setInt('synced_steps_offset', 0);
       // Clear hourly step data for the new day
-      for (int h = 0; h < 24; h++) {
-        await prefs.remove('hourly_steps_\$h');
+      for (final key in prefs.getKeys().where((key) => key.startsWith('hourly_')).toList()) {
+        await prefs.remove(key);
       }
       
       updateNotification();
@@ -189,34 +203,111 @@ void onStart(ServiceInstance service) async {
   }
 
   // Listen to pedometer with auto-reconnection (Samsung kills sensor streams)
-  int lastPedometerValue = -1;
+  Future<void> addHourlyDelta(SharedPreferences prefs, String sessionId, int hour, int delta, String source) async {
+    final prevHourSteps = prefs.getInt('hourly_steps_$hour') ?? 0;
+    final sessionKey = 'hourly_steps_${sessionId}_$hour';
+    final prevSessionHourSteps = prefs.getInt(sessionKey) ?? 0;
+    await prefs.setInt('hourly_steps_$hour', prevHourSteps + delta);
+    await prefs.setInt(sessionKey, prevSessionHourSteps + delta);
+    debugPrint(
+      '🧭 HOURLY BUCKET WRITE $source: session=$sessionId, '
+      'hour=$hour, delta=$delta, sessionHourBefore=$prevSessionHourSteps, '
+      'sessionHourAfter=${prevSessionHourSteps + delta}',
+    );
+  }
+
+  Future<void> writeDeltaAcrossHours({
+    required SharedPreferences prefs,
+    required String sessionId,
+    required int delta,
+    required DateTime from,
+    required DateTime to,
+    required String source,
+  }) async {
+    if (delta <= 0) return;
+    if (!to.isAfter(from) ||
+        (from.hour == to.hour &&
+            from.day == to.day &&
+            from.month == to.month &&
+            from.year == to.year)) {
+      await addHourlyDelta(prefs, sessionId, to.hour, delta, source);
+      return;
+    }
+
+    final boundary = DateTime(to.year, to.month, to.day, to.hour);
+    if (boundary.isAfter(from) && boundary.isBefore(to)) {
+      final totalMs = to.difference(from).inMilliseconds;
+      final previousMs =
+          boundary.difference(from).inMilliseconds.clamp(0, totalMs).toInt();
+      final previousDelta =
+          ((delta * previousMs) / totalMs).round().clamp(0, delta).toInt();
+      final currentDelta = delta - previousDelta;
+      if (previousDelta > 0) {
+        await addHourlyDelta(prefs, sessionId, from.hour, previousDelta, source);
+      }
+      if (currentDelta > 0) {
+        await addHourlyDelta(prefs, sessionId, to.hour, currentDelta, source);
+      }
+      debugPrint(
+        '🧮 HOURLY BOUNDARY SPLIT $source: session=$sessionId, '
+        'from=${from.toIso8601String()}, to=${to.toIso8601String()}, '
+        'delta=$delta, prevHour=${from.hour}:$previousDelta, currentHour=${to.hour}:$currentDelta',
+      );
+      return;
+    }
+
+    await addHourlyDelta(prefs, sessionId, to.hour, delta, source);
+  }
   
   void startPedometer() {
     pedometerSub?.cancel();
     pedometerSub = Pedometer.stepCountStream.listen((StepCount event) {
+      final eventTime = DateTime.now();
       if (baseSteps == -1) {
         baseSteps = event.steps;
       }
       currentSteps = event.steps - baseSteps;
       
-      // Calculate raw delta for hourly tracking (immune to session restarts)
-      int rawDelta = 0;
-      if (lastPedometerValue != -1) {
-        rawDelta = event.steps - lastPedometerValue;
-      }
-      lastPedometerValue = event.steps;
-      
       // Persist total for the foreground to pick up
       final totalSteps = accumulatedBefore + currentSteps;
-      SharedPreferences.getInstance().then((p) {
-        p.setInt('session_accumulated_steps', totalSteps);
+      SharedPreferences.getInstance().then((p) async {
+        await p.setInt('session_accumulated_steps', totalSteps);
+        await p.setString('last_step_timestamp', eventTime.toIso8601String());
         
         // ── Track per-hour steps (Delta Method) ──
-        if (rawDelta > 0 && rawDelta < 1000) { // filter out massive boot jumps
-          final nowHour = DateTime.now().hour;
-          final prevHourSteps = p.getInt('hourly_steps_$nowHour') ?? 0;
-          p.setInt('hourly_steps_$nowHour', prevHourSteps + rawDelta);
+        if (boundSessionId.isEmpty || boundSessionId.startsWith('local_')) {
+          return;
         }
+
+        final rawKey = 'hourly_raw_steps_$boundSessionId';
+        final timeKey = 'hourly_event_time_$boundSessionId';
+        final previousRaw = p.getInt(rawKey);
+        final previousEventTime = DateTime.tryParse(p.getString(timeKey) ?? '');
+        await p.setInt(rawKey, event.steps);
+        await p.setString(timeKey, eventTime.toIso8601String());
+
+        if (previousRaw == null) {
+          debugPrint('🧭 BG hourly initialized: session=$boundSessionId, raw=${event.steps}');
+          return;
+        }
+
+        final rawDelta = event.steps - previousRaw;
+        if (rawDelta <= 0 || rawDelta >= 1000) {
+          debugPrint(
+            '⏭️ BG hourly ignored delta: session=$boundSessionId, '
+            'previousRaw=$previousRaw, raw=${event.steps}, delta=$rawDelta',
+          );
+          return;
+        }
+
+        await writeDeltaAcrossHours(
+          prefs: p,
+          sessionId: boundSessionId,
+          delta: rawDelta,
+          from: previousEventTime ?? eventTime,
+          to: eventTime,
+          source: 'BG',
+        );
       });
       
       updateNotification();
@@ -237,13 +328,24 @@ void onStart(ServiceInstance service) async {
   // Initial notification
   updateNotification();
 
-  // Background sync loop — ONLY syncs when steps actually changed
-  syncTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
+  // ═══════════════════════════════════════════════════════════════════
+  // 🔥 BACKGROUND SYNC LOOP — REPLAYS HOURLY BUCKETS
+  //
+  // OLD BUG: Previously this sent ALL session steps with a single
+  //   current timestamp every 2 seconds. This caused the backend to
+  //   dump ALL steps into the current hour, wiping out earlier hours.
+  //
+  // FIX: Now replays per-hour buckets with per-hour timestamps,
+  //   so steps walked at 4:55 PM stay in Hour 16 and steps walked
+  //   at 5:05 PM go into Hour 17.
+  // ═══════════════════════════════════════════════════════════════════
+  syncTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
     try {
       // Check midnight reset first
       await _checkMidnightReset();
       
       final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
       final token = prefs.getString('auth_token');
       final currentSessionId = prefs.getString('active_session_id');
       
@@ -270,7 +372,6 @@ void onStart(ServiceInstance service) async {
       }
       
       // If session is a local offline one, try to swap it for a real backend session.
-      // If that fails (still offline), skip the sync but keep counting locally.
       if (currentSessionId.startsWith('local_')) {
         debugPrint('📴 BG: Local session detected, attempting to get real session...');
         try {
@@ -290,7 +391,7 @@ void onStart(ServiceInstance service) async {
           
           dynamic respData = startResp.data;
           if (respData is String) {
-            try { respData = await Future.value(respData).then((_) => startResp.data is String ? {} : startResp.data); } catch (_) {}
+            try { respData = jsonDecode(respData); } catch (_) {}
           }
           final realSessionId = (respData is Map) ? (respData['sessionId'] ?? respData['id'] ?? '') : '';
           if (realSessionId.toString().isNotEmpty) {
@@ -303,28 +404,23 @@ void onStart(ServiceInstance service) async {
           }
         } catch (e) {
           debugPrint('📴 BG: Still offline, skipping sync — steps counting locally');
-          return; // Stay alive, retry next cycle
+          return;
         }
       }
       
       // Re-read session ID in case we just swapped it
       final activeSessionId = prefs.getString('active_session_id') ?? '';
       if (activeSessionId.isEmpty || activeSessionId.startsWith('local_')) {
-        return; // Safety check
+        return;
       }
       
-      // We sync bgSteps (which is ONLY the current session's steps) to the backend.
-      // The backend expects session steps and will sum them to get the daily total.
       final bgSteps = accumulatedBefore + currentSteps;
       
-      // ✅ SKIP sync if steps haven't changed since last sync
+      // SKIP sync if steps haven't changed since last sync
       if (bgSteps == lastSyncedTotal) {
         debugPrint('⏭️ BG: Skipping sync — no new steps ($bgSteps)');
         return;
       }
-      
-      final calories = (bgSteps * 0.045).round();
-      final distance = double.parse((bgSteps * 0.000762).toStringAsFixed(3));
       
       final dio = Dio(BaseOptions(
         baseUrl: 'https://uat-api.theeasyfitclinics.com/api',
@@ -335,20 +431,43 @@ void onStart(ServiceInstance service) async {
         },
       ));
       
-      final syncData = {
-        'sessionId': activeSessionId,
-        'steps': bgSteps,
-        'calories': calories,
-        'distance': distance,
-        'timestamp': DateTime.now().toIso8601String(),
-      };
-      
-      debugPrint('\n🚀 REALTIME JSON TO BACKEND:\n${jsonEncode(syncData)}\n');
+      // ── Replay HOURLY BUCKETS with per-hour timestamps ──
+      final now = DateTime.now();
+      final todayStr = DateFormat('yyyy-MM-dd').format(now);
+      int cumulativeSteps = 0;
+      int replayedCount = 0;
 
-      await dio.post('/activity/sync', data: syncData);
-      
-      lastSyncedTotal = bgSteps;
-      debugPrint('✅ BG Sync: $bgSteps steps (synced)');
+      for (int h = 0; h <= now.hour; h++) {
+        final bucketKey = 'hourly_steps_${activeSessionId}_$h';
+        final hourSteps = prefs.getInt(bucketKey) ?? 0;
+        if (hourSteps > 0) {
+          cumulativeSteps += hourSteps;
+          final cals = (cumulativeSteps * 0.045).round();
+          final dist = double.parse((cumulativeSteps * 0.000762).toStringAsFixed(3));
+          final hourPad = h.toString().padLeft(2, '0');
+          final customTimestamp = '${todayStr}T$hourPad:59:59.000';
+
+          try {
+            await dio.post('/activity/sync', data: {
+              'sessionId': activeSessionId,
+              'steps': cumulativeSteps,
+              'calories': cals,
+              'distance': dist,
+              'timestamp': customTimestamp,
+            });
+            replayedCount++;
+          } catch (e) {
+            debugPrint('⚠️ BG Hourly replay failed for hour $h: $e');
+          }
+        }
+      }
+
+      if (replayedCount > 0) {
+        lastSyncedTotal = bgSteps;
+        debugPrint('✅ BG Hourly Sync: Replayed $replayedCount buckets (cumulative $cumulativeSteps steps)');
+      } else {
+        debugPrint('⏭️ BG: No hourly buckets to replay');
+      }
     } catch (e) {
       debugPrint('❌ BG Sync Error: $e');
     }

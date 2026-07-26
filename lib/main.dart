@@ -5,16 +5,28 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart'
     hide ChangeNotifierProvider;
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'core/router/app_router.dart';
 import 'providers/auth_provider.dart';
 import 'features/admin/presentation/providers/admin_provider.dart';
 import 'features/tracking/services/activity_background_service.dart';
+import 'services/fcm_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Initialize Firebase
+  await Firebase.initializeApp();
+
+  // Register FCM background handler (must be top-level function)
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
   unawaited(_initializeBackgroundService());
+
+  // Initialize FCM (token registration, foreground handler)
+  unawaited(FcmService().initialize());
 
   runApp(
     const ProviderScope(
