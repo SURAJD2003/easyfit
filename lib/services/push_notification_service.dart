@@ -6,12 +6,98 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:dio/dio.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import '../core/api_client.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // This is required to process background messages.
   debugPrint('Handling a background message: ${message.messageId}');
+  
+  final type = message.data['type'] ?? message.data['Type'] ?? '';
+  if (type == 'sync_request' || type == 'sync_steps') {
+    debugPrint('🔄 FCM BACKGROUND: Triggering silent pedometer sync...');
+    await _performSilentSync();
+  }
+}
+
+bool _isFcmSyncing = false;
+
+Future<void> _performSilentSync() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final token = prefs.getString('auth_token') ?? '';
+    final sessionId = prefs.getString('active_session_id') ?? '';
+
+    if (token.isEmpty || sessionId.isEmpty || sessionId.startsWith('local_')) {
+      return;
+    }
+
+    final steps = prefs.getInt('session_accumulated_steps') ?? 0;
+    if (steps <= 0) return;
+
+    final service = FlutterBackgroundService();
+    final isBackgroundRunning = await service.isRunning();
+    if (isBackgroundRunning) return;
+
+    if (_isFcmSyncing) return;
+    _isFcmSyncing = true;
+    
+    final dio = Dio(BaseOptions(
+      baseUrl: 'https://uat-api.theeasyfitclinics.com/api',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+    ));
+
+    final List<Map<String, dynamic>> hourlyData = [];
+    final now = DateTime.now();
+    for (int h = 0; h <= now.hour; h++) {
+      final bucketKey = 'hourly_steps_${sessionId}_$h';
+      final syncedKey = 'synced_hourly_steps_${sessionId}_$h';
+      final totalSteps = prefs.getInt(bucketKey) ?? 0;
+      final alreadySynced = prefs.getInt(syncedKey) ?? 0;
+      final delta = totalSteps - alreadySynced;
+
+      if (delta > 0) {
+        final deltaCals = (delta * 0.045).round();
+        final deltaDist = double.parse((delta * 0.000762).toStringAsFixed(3));
+        hourlyData.add({
+          'hour': h,
+          'steps': delta,
+          'calories': deltaCals,
+          'distance': deltaDist,
+        });
+      }
+    }
+
+    if (hourlyData.isEmpty) return;
+
+    final payload = {
+      'sessionId': sessionId,
+      'hourlyData': hourlyData,
+    };
+
+    final response = await dio.post('/activity/sync', data: payload);
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      for (final bucket in hourlyData) {
+        final h = bucket['hour'] as int;
+        final syncedKey = 'synced_hourly_steps_${sessionId}_$h';
+        final bucketKey = 'hourly_steps_${sessionId}_$h';
+        final currentTotal = prefs.getInt(bucketKey) ?? 0;
+        await prefs.setInt(syncedKey, currentTotal);
+      }
+      debugPrint('✅ FCM Silent Sync Success');
+    }
+  } catch (e) {
+    debugPrint('❌ FCM Silent Sync Failed: $e');
+  } finally {
+    _isFcmSyncing = false;
+  }
 }
 
 class PushNotificationService {
@@ -74,7 +160,12 @@ class PushNotificationService {
       // 3. Configure FCM foreground message handler
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         debugPrint('Got a message whilst in the foreground!');
-        debugPrint('Message data: ${message.data}');
+        
+        final type = message.data['type'] ?? message.data['Type'] ?? '';
+        if (type == 'sync_request' || type == 'sync_steps') {
+          debugPrint('🔄 FCM FOREGROUND: Triggering silent pedometer sync...');
+          _performSilentSync();
+        }
 
         if (message.notification != null) {
           debugPrint('Message also contained a notification: ${message.notification}');
