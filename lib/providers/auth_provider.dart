@@ -14,6 +14,7 @@ import '../models/auth/logout_request.dart';
 import '../models/auth/forgot_password_request.dart';
 import '../models/api_result.dart';
 import '../features/subscription/data/models/subscription_request_status_model.dart';
+import '../services/push_notification_service.dart';
 
 enum AuthStatus { idle, loading, success, error }
 
@@ -203,7 +204,7 @@ class AuthProvider extends ChangeNotifier {
       ApiClient().setToken(_token!);
       _status = AuthStatus.success;
       unawaited(fetchProfile()); // fetch profile quietly in background
-      unawaited(FcmService().registerToken()); // register FCM token with backend
+      PushNotificationService().registerTokenWithBackend();
     }
     notifyListeners();
   }
@@ -239,9 +240,7 @@ class AuthProvider extends ChangeNotifier {
         await prefs.setString('auth_refresh_token', _refreshToken!);
 
       await fetchProfile();
-
-      // Register FCM token with backend now that we have auth
-      unawaited(FcmService().registerToken());
+      PushNotificationService().registerTokenWithBackend();
     } else {
       _errorMessage = result.error?.message ?? 'Registration failed';
       _status = AuthStatus.error;
@@ -270,9 +269,7 @@ class AuthProvider extends ChangeNotifier {
         await prefs.setString('auth_refresh_token', _refreshToken!);
 
       await fetchProfile();
-
-      // Register FCM token with backend now that we have auth
-      unawaited(FcmService().registerToken());
+      PushNotificationService().registerTokenWithBackend();
     } else {
       _errorMessage = result.error?.message ?? 'Login failed';
       _status = AuthStatus.error;

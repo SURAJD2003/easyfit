@@ -7,6 +7,25 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:669236338298:android:32d8279afe280288e825c3",
+        "android_client_info": {
+          "package_name": "com.example.the_easyfit_clinic"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA80aFveQBPkH2s7hI9ngUw76tmMnojXqA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:669236338298:android:cc00afcc2f096a10e825c3",
         "android_client_info": {
           "package_name": "com.theeasyfitclinics.app"

@@ -14,14 +14,22 @@ import 'features/admin/presentation/providers/admin_provider.dart';
 import 'features/tracking/services/activity_background_service.dart';
 import 'services/fcm_service.dart';
 
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'firebase_options.dart';
+import 'services/push_notification_service.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize Firebase
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   // Register FCM background handler (must be top-level function)
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  await PushNotificationService().initialize();
 
   unawaited(_initializeBackgroundService());
 
