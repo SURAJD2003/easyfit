@@ -12,7 +12,6 @@ import 'core/router/app_router.dart';
 import 'providers/auth_provider.dart';
 import 'features/admin/presentation/providers/admin_provider.dart';
 import 'features/tracking/services/activity_background_service.dart';
-import 'services/fcm_service.dart';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -32,9 +31,6 @@ Future<void> main() async {
   await PushNotificationService().initialize();
 
   unawaited(_initializeBackgroundService());
-
-  // Initialize FCM (token registration, foreground handler)
-  unawaited(FcmService().initialize());
 
   runApp(
     const ProviderScope(

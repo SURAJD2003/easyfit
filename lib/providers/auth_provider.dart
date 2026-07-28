@@ -1,18 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/api_client.dart';
 import '../services/auth_service.dart';
-import '../services/fcm_service.dart';
 import '../models/auth/register_request.dart';
 import '../models/auth/register_response.dart';
 import '../models/auth/login_request.dart';
-import '../models/auth/login_response.dart';
 import '../models/auth/logout_request.dart';
 import '../models/auth/forgot_password_request.dart';
-import '../models/api_result.dart';
 import '../features/subscription/data/models/subscription_request_status_model.dart';
 import '../services/push_notification_service.dart';
 
