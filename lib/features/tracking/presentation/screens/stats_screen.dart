@@ -114,7 +114,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
       final prefs = await SharedPreferences.getInstance();
       final activeSessionId = prefs.getString('active_session_id') ?? '';
       if (activeSessionId.isNotEmpty) {
-        await repo.replayHourlyBuckets(activeSessionId);
+        await repo.syncHourlyBuckets(activeSessionId);
       }
     } catch (e) {
       debugPrint('⚠️ [StatsScreen] Hourly replay error: $e');

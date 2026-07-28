@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import '../../../../core/api_client.dart';
 import '../../../../core/api_constants.dart';
 
@@ -117,11 +118,32 @@ class ActivityRemoteDatasource {
       try {
         final parsedTime = DateTime.parse(endTime);
         final hourBucket = '${parsedTime.hour}:00 - ${parsedTime.hour + 1}:00';
+        
+        // ═══ CONSISTENCY AUDIT: Compare synced total vs finalSteps ═══
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.reload();
+        int totalSyncedToBackend = 0;
+        final List<String> syncedBreakdown = [];
+        for (int h = 0; h < 24; h++) {
+          final syncedKey = 'synced_hourly_steps_${sessionId}_$h';
+          final synced = prefs.getInt(syncedKey) ?? 0;
+          if (synced > 0) {
+            totalSyncedToBackend += synced;
+            syncedBreakdown.add('Hour $h: $synced');
+          }
+        }
+        final match = totalSyncedToBackend == finalSteps ? '✅ MATCH' : '⚠️ MISMATCH';
+        
         debugPrint('');
         debugPrint('═══════════════════════════════════════════');
         debugPrint('🔬 STOP SESSION DEBUG (Datasource):');
         debugPrint('   🛑 Stopping session: $sessionId');
-        debugPrint('   📊 Final steps sent: $finalSteps');
+        debugPrint('   📊 Final steps sent to /stop: $finalSteps');
+        debugPrint('   📊 Total synced via /sync:    $totalSyncedToBackend');
+        debugPrint('   $match');
+        if (syncedBreakdown.isNotEmpty) {
+          debugPrint('   📦 Synced breakdown: ${syncedBreakdown.join(', ')}');
+        }
         debugPrint('   ⏰ endTime sent: $endTime');
         debugPrint('   🪣 Target bucket of endTime: $hourBucket');
         debugPrint('   📋 Full Stop payload: ${jsonEncode(stopData)}');
@@ -136,92 +158,106 @@ class ActivityRemoteDatasource {
     return _parseResponse(response.data);
   }
 
-  // POST /activity/sync → send live steps to server
-  Future<void> syncSteps({
-    required String sessionId,
-    required int steps,
-    required int calories,
-    required double distance,
-    String? customTimestamp,
-  }) async {
+  static bool _isSyncing = false;
+
+  // POST /activity/sync → send hourly delta buckets to server as an array
+  Future<void> syncHourlyBuckets(String sessionId) async {
+    if (sessionId.isEmpty || sessionId.startsWith('local_')) return;
+    
+    if (_isSyncing) {
+      debugPrint('⏭️ FG hourly skipped: sync already in progress');
+      return;
+    }
+    _isSyncing = true;
+
+    try {
+    
+    // If the background service is running, IT owns syncing the hourly buckets.
+    // If we sync from the foreground at the exact same time, we'll double-sync the delta
+    // because both read the old `alreadySynced` value from SharedPreferences before either writes to it.
+    final service = FlutterBackgroundService();
+    final isBackgroundRunning = await service.isRunning();
+    if (isBackgroundRunning) {
+      debugPrint('⏭️ FG hourly skipped: background service owns hourly buckets (session=$sessionId)');
+      return;
+    }
+
     final prefs = await SharedPreferences.getInstance();
-    final stepTime = customTimestamp ?? prefs.getString('last_step_timestamp') ?? DateTime.now().toIso8601String();
+    await prefs.reload();
+    
+    // Cross-isolate lock wait
+    bool isBgSyncing = prefs.getBool('is_bg_syncing') ?? false;
+    int waitCount = 0;
+    while (isBgSyncing && waitCount < 10) {
+      debugPrint('⏳ FG waiting for BG sync to finish (cross-isolate lock)...');
+      await Future.delayed(const Duration(milliseconds: 500));
+      await prefs.reload();
+      isBgSyncing = prefs.getBool('is_bg_syncing') ?? false;
+      waitCount++;
+    }
+
+    final now = DateTime.now();
+
+    // Build hourlyData array with DELTAS (new steps since last successful sync)
+    final List<Map<String, dynamic>> hourlyData = [];
+
+    for (int h = 0; h <= now.hour; h++) {
+      final bucketKey = 'hourly_steps_${sessionId}_$h';
+      final syncedKey = 'synced_hourly_steps_${sessionId}_$h';
+      final totalSteps = prefs.getInt(bucketKey) ?? 0;
+      final alreadySynced = prefs.getInt(syncedKey) ?? 0;
+      final delta = totalSteps - alreadySynced;
+
+      if (delta > 0) {
+        final deltaCals = (delta * 0.045).round();
+        final deltaDist = double.parse((delta * 0.000762).toStringAsFixed(3));
+        hourlyData.add({
+          'hour': h,
+          'steps': delta,
+          'calories': deltaCals,
+          'distance': deltaDist,
+        });
+        debugPrint('   📦 Hour $h: delta=$delta (total=$totalSteps, synced=$alreadySynced)');
+      }
+    }
+
+    if (hourlyData.isEmpty) {
+      debugPrint('⏭️ syncHourlyBuckets: No new deltas to send');
+      return;
+    }
+
     final payload = {
       'sessionId': sessionId,
-      'steps': steps,
-      'calories': calories,
-      'distance': distance,
-      'timestamp': stepTime,
+      'hourlyData': hourlyData,
     };
-    
-    // ═══ HEAVY DEBUG: SYNC STEPS ═══
-    try {
-      final parsedTime = DateTime.parse(stepTime);
-      final hourBucket = '${parsedTime.hour}:00 - ${parsedTime.hour + 1}:00';
-      debugPrint('');
-      debugPrint('═══════════════════════════════════════════');
-      debugPrint('🔬 SYNC DEBUG (foreground datasource):');
-      debugPrint('   📤 Sending $steps steps to backend');
-      debugPrint('   ⏰ Timestamp: $stepTime');
-      debugPrint('   🪣 Hour bucket: $hourBucket');
-      debugPrint('   🔑 Session: $sessionId');
-      debugPrint('   📋 Full payload: ${jsonEncode(payload)}');
-      debugPrint('═══════════════════════════════════════════');
-      debugPrint('');
-    } catch (_) {}
-    
+
+    debugPrint('');
+    debugPrint('═══════════════════════════════════════════');
+    debugPrint('📤 SYNC HOURLY BUCKETS (Array):');
+    debugPrint('   🔑 Session: $sessionId');
+    debugPrint('   📦 Buckets: ${hourlyData.length}');
+    debugPrint('   📋 Payload: ${jsonEncode(payload)}');
+    debugPrint('═══════════════════════════════════════════');
+    debugPrint('');
+
     await _dio.post(
       ApiConstants.activitySync,
       data: payload,
     );
-  }
 
-  /// Replay local hourly step buckets to the backend as timestamped cumulative syncs
-  Future<void> replayHourlyBuckets(String sessionId) async {
-    if (sessionId.isEmpty || sessionId.startsWith('local_')) return;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.reload();
-    final now = DateTime.now();
-    final todayStr = DateFormat('yyyy-MM-dd').format(now);
-    int cumulativeSteps = 0;
-    int replayedCount = 0;
-
-    debugPrint('');
-    debugPrint('═══════════════════════════════════════════');
-    debugPrint('🔄 STARTING HOURLY REPLAY FOR SESSION: $sessionId');
-
-    for (int h = 0; h <= now.hour; h++) {
+    // SUCCESS — mark these deltas as synced so we don't send them again
+    for (final bucket in hourlyData) {
+      final h = bucket['hour'] as int;
+      final syncedKey = 'synced_hourly_steps_${sessionId}_$h';
       final bucketKey = 'hourly_steps_${sessionId}_$h';
-      final hourSteps = prefs.getInt(bucketKey) ?? 0;
-      if (hourSteps > 0) {
-        cumulativeSteps += hourSteps;
-        final calories = (cumulativeSteps * 0.045).round();
-        final distance = double.parse((cumulativeSteps * 0.000762).toStringAsFixed(3));
-        final hourPad = h.toString().padLeft(2, '0');
-        final customTimestamp = '${todayStr}T$hourPad:59:59.000';
-
-        debugPrint('   👉 Replaying Hour $h ($hourSteps steps -> cumulative $cumulativeSteps) @ $customTimestamp');
-
-        try {
-          await syncSteps(
-            sessionId: sessionId,
-            steps: cumulativeSteps,
-            calories: calories,
-            distance: distance,
-            customTimestamp: customTimestamp,
-          );
-          replayedCount++;
-        } catch (e) {
-          debugPrint('   ⚠️ Replay failed for hour $h: $e');
-        }
-      } else {
-        debugPrint('   ⏭️ Replay skip hour $h: $bucketKey has 0 steps');
-      }
+      final currentTotal = prefs.getInt(bucketKey) ?? 0;
+      await prefs.setInt(syncedKey, currentTotal);
     }
 
-    debugPrint('✅ HOURLY REPLAY COMPLETE: Replayed $replayedCount buckets (Total cumulative: $cumulativeSteps steps)');
-    debugPrint('═══════════════════════════════════════════');
-    debugPrint('');
+    debugPrint('✅ syncHourlyBuckets: Sent ${hourlyData.length} buckets successfully');
+    } finally {
+      _isSyncing = false;
+    }
   }
 
   // GET /activity/stats/monthly?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD

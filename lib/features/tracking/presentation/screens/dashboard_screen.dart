@@ -1489,6 +1489,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       });
     });
   }
+
   
   bool _hasCheckedCatchup = false;
 
@@ -1595,7 +1596,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       
       // FIX: Use hourly replay instead of sending all steps with current
       // timestamp, which would dump everything into the current hour.
-      await repo.replayHourlyBuckets(activeSessionId);
+      await repo.syncHourlyBuckets(activeSessionId);
       debugPrint('✅ Catch-up sync pushed $missingSteps steps on session $activeSessionId (via hourly replay)');
       
       // Refresh dashboard to reflect updated backend total
@@ -2040,7 +2041,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           // finalSteps is what we send to the backend for THIS SESSION ONLY.
           // It must NOT include _lastCompletedSteps, otherwise the backend will sum the daily total repeatedly!
           // HOWEVER: if we detected missing steps that never reached the server, include them here.
-          final rawFinalSteps = math.max(sessionSteps, bgAccumulatedSteps);
+          // Also check hourly bucket totals — the BG service may have synced steps that
+          // haven't been reflected in session_accumulated_steps yet (race condition on short sessions).
+          int hourlyBucketTotal = 0;
+          for (int h = 0; h < 24; h++) {
+            hourlyBucketTotal += prefs.getInt('hourly_steps_${sessionIdToStop}_$h') ?? 0;
+          }
+          final rawFinalSteps = [sessionSteps, bgAccumulatedSteps, hourlyBucketTotal].reduce(math.max);
           final finalSteps = rawFinalSteps + _pendingCatchupSteps;
           final finalCalories = (finalSteps * 0.045).round();
           final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
@@ -2053,7 +2060,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           
           // Replay hourly buckets before stopping
           try {
-            await repo.replayHourlyBuckets(sessionIdToStop);
+            await repo.syncHourlyBuckets(sessionIdToStop);
           } catch (e) {
             debugPrint('⚠️ Pre-stop hourly replay failed: $e');
           }
@@ -2149,7 +2156,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           debugPrint('📴 Tab sync skipped (offline=${ !online}, local=$isLocalSession) — keeping session alive');
         } else {
           // ONLINE: Normal stop → start flow
-          // IMPORTANT: Stop background service FIRST to prevent race conditions
+          // IMPORTANT: Wait for any in-progress BG syncs to finish before killing the isolate
+          // If we kill the isolate mid-HTTP-request, the server gets the steps but the app doesn't know!
+          final tempPrefs = await SharedPreferences.getInstance();
+          await tempPrefs.reload();
+          bool isBgSyncing = tempPrefs.getBool('is_bg_syncing') ?? false;
+          int waitCount = 0;
+          while (isBgSyncing && waitCount < 10) {
+            debugPrint('⏳ Dashboard waiting for BG sync to finish before stopping service...');
+            await Future.delayed(const Duration(milliseconds: 500));
+            await tempPrefs.reload();
+            isBgSyncing = tempPrefs.getBool('is_bg_syncing') ?? false;
+            waitCount++;
+          }
+          
           final service = FlutterBackgroundService();
           service.invoke('stopService');
           await Future.delayed(const Duration(milliseconds: 500));
@@ -2161,7 +2181,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           // finalSteps is what we send to the backend for THIS SESSION ONLY.
           // It must NOT include _lastCompletedSteps!
           // HOWEVER: if we detected missing steps that never reached the server, include them here.
-          final rawFinalSteps = math.max(sessionSteps, bgAccumulatedSteps);
+          // Also check hourly bucket totals — the BG service may have synced steps that
+          // haven't been reflected in session_accumulated_steps yet (race condition on short sessions).
+          int hourlyBucketTotal = 0;
+          for (int h = 0; h < 24; h++) {
+            hourlyBucketTotal += prefs.getInt('hourly_steps_${sessionIdToStop}_$h') ?? 0;
+          }
+          final rawFinalSteps = [sessionSteps, bgAccumulatedSteps, hourlyBucketTotal].reduce(math.max);
           final finalSteps = rawFinalSteps + _pendingCatchupSteps;
           final finalCalories = (finalSteps * 0.045).round();
           final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
@@ -2173,7 +2199,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           
           // Replay hourly buckets before stopping
           try {
-            await repo.replayHourlyBuckets(sessionIdToStop);
+            await repo.syncHourlyBuckets(sessionIdToStop);
           } catch (e) {
             debugPrint('⚠️ Pre-stop tab hourly replay failed: $e');
           }
@@ -4641,14 +4667,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             if (sessionIdToStop.isNotEmpty) {
               // Send ONLY this session's steps to the backend
               final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
-              final finalSteps = math.max(bgAccumulatedSteps, sessionSteps);
+              // Also check hourly bucket totals for race condition on short sessions
+              int hourlyBucketTotal = 0;
+              for (int h = 0; h < 24; h++) {
+                hourlyBucketTotal += prefs.getInt('hourly_steps_${sessionIdToStop}_$h') ?? 0;
+              }
+              final finalSteps = [bgAccumulatedSteps, sessionSteps, hourlyBucketTotal].reduce(math.max);
               final finalCalories = (finalSteps * 0.045).round();
               final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
               
               debugPrint('📊 Stop: live=$livePedometerSteps, api=${prevApiSteps.toInt()}, bg=$bgAccumulatedSteps, final=$finalSteps, display=$_lastCompletedSteps');
               
               try {
-                await repo.replayHourlyBuckets(sessionIdToStop);
+                await repo.syncHourlyBuckets(sessionIdToStop);
                 await repo.stopSession(
                   sessionId: sessionIdToStop,
                   finalSteps: finalSteps,

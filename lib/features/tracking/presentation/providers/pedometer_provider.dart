@@ -111,7 +111,7 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
           if (sessionId.isNotEmpty) {
             // FIX: Use hourly replay instead of single-timestamp
             // sync, which would dump all steps into a single hour.
-            await repo.replayHourlyBuckets(sessionId);
+            await repo.syncHourlyBuckets(sessionId);
           }
         } catch (e) {
           debugPrint('⚠️ Final sync for old day failed: $e');
@@ -500,9 +500,18 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
             //   sync. Sending ALL steps with current timestamp
             //   overwrites the per-hour distribution.
             // ═══════════════════════════════════════════════════
-            await repo.replayHourlyBuckets(sessionId);
+            // ONLY sync from FG if the BG service isn't running to avoid double-sync races!
+            final service = FlutterBackgroundService();
+            final isBackgroundRunning = await service.isRunning();
+            
+            if (isBackgroundRunning) {
+              debugPrint('⏭️ FG hourly skipped: background service owns hourly buckets (session=$sessionId, raw=$sessionSteps)');
+            } else {
+              await repo.syncHourlyBuckets(sessionId);
+              debugPrint('✅ FG Sync: $stepsToSync steps (via hourly replay)');
+            }
+            
             _lastSyncedSteps = stepsToSync;
-            debugPrint('✅ FG Sync: $stepsToSync steps (via hourly replay)');
           }
         } catch (e) {
           debugPrint('❌ FG Sync failed: $e');

@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 
 /// Top-level background message handler (must be a top-level function)
 /// This runs even when the app is killed/terminated.
@@ -29,6 +30,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     debugPrint('ℹ️ FCM: Unknown message type "$type", ignoring');
   }
 }
+
+bool _isFcmSyncing = false;
 
 /// Reads the latest step count from SharedPreferences and sends it to the backend.
 /// This is the exact same logic as the background service's sync,
@@ -69,12 +72,24 @@ Future<void> _performSilentSync() async {
       return;
     }
 
+    final service = FlutterBackgroundService();
+    final isBackgroundRunning = await service.isRunning();
+    if (isBackgroundRunning) {
+      debugPrint('⏭️ FCM sync SKIPPED: Background service is already running and owns syncing');
+      return;
+    }
+
+    if (_isFcmSyncing) {
+      debugPrint('⏭️ FCM sync SKIPPED: FCM sync already in progress');
+      return;
+    }
+    _isFcmSyncing = true;
+    
     final calories = (steps * 0.045).round();
     final distance = double.parse((steps * 0.000762).toStringAsFixed(3));
 
-    // Replay hourly buckets on FCM trigger to ensure per-hour timestamps reach backend
+    // Build hourlyData array with DELTAS for array-based sync
     final now = DateTime.now();
-    final todayStr = DateFormat('yyyy-MM-dd').format(now);
     final dio = Dio(BaseOptions(
       baseUrl: 'https://uat-api.theeasyfitclinics.com/api',
       headers: {
@@ -84,58 +99,64 @@ Future<void> _performSilentSync() async {
       },
     ));
 
-    int cumulativeReplay = 0;
+    final List<Map<String, dynamic>> hourlyData = [];
     for (int h = 0; h <= now.hour; h++) {
-      final hourSteps = prefs.getInt('hourly_steps_${sessionId}_$h') ?? 0;
-      if (hourSteps > 0) {
-        cumulativeReplay += hourSteps;
-        final cals = (cumulativeReplay * 0.045).round();
-        final dist = double.parse((cumulativeReplay * 0.000762).toStringAsFixed(3));
-        final hPad = h.toString().padLeft(2, '0');
-        final ts = '${todayStr}T$hPad:59:59.000';
-        try {
-          await dio.post('/activity/sync', data: {
-            'sessionId': sessionId,
-            'steps': cumulativeReplay,
-            'calories': cals,
-            'distance': dist,
-            'timestamp': ts,
-          });
-        } catch (_) {}
+      final bucketKey = 'hourly_steps_${sessionId}_$h';
+      final syncedKey = 'synced_hourly_steps_${sessionId}_$h';
+      final totalSteps = prefs.getInt(bucketKey) ?? 0;
+      final alreadySynced = prefs.getInt(syncedKey) ?? 0;
+      final delta = totalSteps - alreadySynced;
+
+      if (delta > 0) {
+        final deltaCals = (delta * 0.045).round();
+        final deltaDist = double.parse((delta * 0.000762).toStringAsFixed(3));
+        hourlyData.add({
+          'hour': h,
+          'steps': delta,
+          'calories': deltaCals,
+          'distance': deltaDist,
+        });
       }
     }
 
-    if (cumulativeReplay == 0) {
-      final stepTime = prefs.getString('last_step_timestamp') ?? DateTime.now().toIso8601String();
-      final syncData = {
-        'sessionId': sessionId,
-        'steps': steps,
-        'calories': calories,
-        'distance': distance,
-        'timestamp': stepTime,
-      };
-
-      debugPrint('🚀 FCM SYNC REQUEST TO BACKEND:');
-      debugPrint('   URL: https://uat-api.theeasyfitclinics.com/api/activity/sync');
-      debugPrint('   Payload: ${jsonEncode(syncData)}');
-
-      final response = await dio.post('/activity/sync', data: syncData);
-
-      debugPrint('✅ FCM SYNC SUCCESS:');
-      debugPrint('   Status: ${response.statusCode}');
-      debugPrint('   Response: ${response.data}');
-      debugPrint('   Steps synced: $steps');
-    } else {
-      debugPrint('✅ FCM HOURLY REPLAY SUCCESS: Replayed $cumulativeReplay cumulative steps across hourly buckets');
+    if (hourlyData.isEmpty) {
+      debugPrint('⏭️ FCM: No hourly deltas to send');
+      return;
     }
-  } catch (e) {
-    debugPrint('❌ FCM SYNC FAILED:');
-    debugPrint('   Error: $e');
-    if (e is DioException) {
-      debugPrint('   Status Code: ${e.response?.statusCode}');
-      debugPrint('   Response: ${e.response?.data}');
+
+    final payload = {
+      'sessionId': sessionId,
+      'hourlyData': hourlyData,
+    };
+
+    debugPrint('🚀 FCM SYNC REQUEST (Array):');
+    debugPrint('   Payload: ${jsonEncode(payload)}');
+
+    final response = await dio.post('/activity/sync', data: payload);
+
+    debugPrint('✅ FCM SYNC SUCCESS:');
+    debugPrint('   Status: ${response.statusCode}');
+    debugPrint('   Response: ${response.data}');
+
+    // SUCCESS — mark deltas as synced
+    for (final bucket in hourlyData) {
+      final h = bucket['hour'] as int;
+      final syncedKey = 'synced_hourly_steps_${sessionId}_$h';
+      final bucketKey = 'hourly_steps_${sessionId}_$h';
+      final currentTotal = prefs.getInt(bucketKey) ?? 0;
+      await prefs.setInt(syncedKey, currentTotal);
     }
-  }
+    debugPrint('✅ FCM Array Sync: Sent ${hourlyData.length} buckets');
+    } catch (e) {
+      debugPrint('❌ FCM SYNC FAILED:');
+      debugPrint('   Error: $e');
+      if (e is DioException) {
+        debugPrint('   Status Code: ${e.response?.statusCode}');
+        debugPrint('   Response: ${e.response?.data}');
+      }
+    } finally {
+      _isFcmSyncing = false;
+    }
 }
 
 /// Service class to initialize FCM and handle token registration

@@ -339,13 +339,20 @@ void onStart(ServiceInstance service) async {
   //   so steps walked at 4:55 PM stay in Hour 16 and steps walked
   //   at 5:05 PM go into Hour 17.
   // ═══════════════════════════════════════════════════════════════════
+  bool _isBgSyncing = false;
   syncTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
+    if (_isBgSyncing) {
+      debugPrint('⏭️ BG: Sync already in progress, skipping timer tick');
+      return;
+    }
+    _isBgSyncing = true;
     try {
-      // Check midnight reset first
-      await _checkMidnightReset();
-      
       final prefs = await SharedPreferences.getInstance();
       await prefs.reload();
+      await prefs.setBool('is_bg_syncing', true);
+      debugPrint('🔒 BG LOCK: Acquired cross-isolate lock (is_bg_syncing=true)');
+      
+      // Check midnight reset first
       final token = prefs.getString('auth_token');
       final currentSessionId = prefs.getString('active_session_id');
       
@@ -431,45 +438,62 @@ void onStart(ServiceInstance service) async {
         },
       ));
       
-      // ── Replay HOURLY BUCKETS with per-hour timestamps ──
+      // ── Build hourlyData array with DELTAS ──
       final now = DateTime.now();
-      final todayStr = DateFormat('yyyy-MM-dd').format(now);
-      int cumulativeSteps = 0;
-      int replayedCount = 0;
+      final List<Map<String, dynamic>> hourlyData = [];
 
       for (int h = 0; h <= now.hour; h++) {
         final bucketKey = 'hourly_steps_${activeSessionId}_$h';
-        final hourSteps = prefs.getInt(bucketKey) ?? 0;
-        if (hourSteps > 0) {
-          cumulativeSteps += hourSteps;
-          final cals = (cumulativeSteps * 0.045).round();
-          final dist = double.parse((cumulativeSteps * 0.000762).toStringAsFixed(3));
-          final hourPad = h.toString().padLeft(2, '0');
-          final customTimestamp = '${todayStr}T$hourPad:59:59.000';
+        final syncedKey = 'synced_hourly_steps_${activeSessionId}_$h';
+        final totalSteps = prefs.getInt(bucketKey) ?? 0;
+        final alreadySynced = prefs.getInt(syncedKey) ?? 0;
+        final delta = totalSteps - alreadySynced;
 
-          try {
-            await dio.post('/activity/sync', data: {
-              'sessionId': activeSessionId,
-              'steps': cumulativeSteps,
-              'calories': cals,
-              'distance': dist,
-              'timestamp': customTimestamp,
-            });
-            replayedCount++;
-          } catch (e) {
-            debugPrint('⚠️ BG Hourly replay failed for hour $h: $e');
-          }
+        if (delta > 0) {
+          final deltaCals = (delta * 0.045).round();
+          final deltaDist = double.parse((delta * 0.000762).toStringAsFixed(3));
+          hourlyData.add({
+            'hour': h,
+            'steps': delta,
+            'calories': deltaCals,
+            'distance': deltaDist,
+          });
         }
       }
 
-      if (replayedCount > 0) {
+      if (hourlyData.isEmpty) {
+        debugPrint('⏭️ BG: No hourly deltas to send');
+        return;
+      }
+
+      try {
+        await dio.post('/activity/sync', data: {
+          'sessionId': activeSessionId,
+          'hourlyData': hourlyData,
+        });
+
+        // SUCCESS — mark deltas as synced
+        for (final bucket in hourlyData) {
+          final h = bucket['hour'] as int;
+          final syncedKey = 'synced_hourly_steps_${activeSessionId}_$h';
+          final bucketKey = 'hourly_steps_${activeSessionId}_$h';
+          final currentTotal = prefs.getInt(bucketKey) ?? 0;
+          await prefs.setInt(syncedKey, currentTotal);
+        }
+
         lastSyncedTotal = bgSteps;
-        debugPrint('✅ BG Hourly Sync: Replayed $replayedCount buckets (cumulative $cumulativeSteps steps)');
-      } else {
-        debugPrint('⏭️ BG: No hourly buckets to replay');
+        debugPrint('✅ BG Array Sync: Sent ${hourlyData.length} buckets');
+      } catch (e) {
+        debugPrint('⚠️ BG Array sync failed: $e');
       }
     } catch (e) {
       debugPrint('❌ BG Sync Error: $e');
+    } finally {
+      _isBgSyncing = false;
+      SharedPreferences.getInstance().then((p) {
+        p.setBool('is_bg_syncing', false);
+        debugPrint('🔓 BG LOCK: Released cross-isolate lock (is_bg_syncing=false)');
+      });
     }
   });
 
