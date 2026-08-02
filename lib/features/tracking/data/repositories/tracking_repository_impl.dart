@@ -57,8 +57,8 @@ class TrackingRepositoryImpl implements TrackingRepository {
   }
 
   @override
-  Future<void> syncHourlyBuckets(String sessionId) {
-    return remoteDatasource.syncHourlyBuckets(sessionId);
+  Future<void> syncHourlyBuckets(String sessionId, {bool force = false}) {
+    return remoteDatasource.syncHourlyBuckets(sessionId, force: force);
   }
 
   @override

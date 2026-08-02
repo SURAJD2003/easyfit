@@ -74,8 +74,15 @@ class ActivityRemoteDatasource {
       ApiConstants.activityWeeklyStats,
       queryParameters: params.isNotEmpty ? params : null,
     );
-    return _parseResponse(response.data);
+    final parsed = _parseResponse(response.data);
+    debugPrint('\n===================================================');
+    debugPrint('📊 WEEKLY STATS RESPONSE (FROM BACKEND):');
+    debugPrint('   Params: $params');
+    debugPrint('   Payload: ${jsonEncode(parsed)}');
+    debugPrint('===================================================\n');
+    return parsed;
   }
+
 
   // POST /activity/session/start → "Continue Your Journey" tapped
   // Backend handles orphan sessions automatically:
@@ -134,34 +141,39 @@ class ActivityRemoteDatasource {
         }
         final match = totalSyncedToBackend == finalSteps ? '✅ MATCH' : '⚠️ MISMATCH';
         
-        debugPrint('');
-        debugPrint('═══════════════════════════════════════════');
-        debugPrint('🔬 STOP SESSION DEBUG (Datasource):');
-        debugPrint('   🛑 Stopping session: $sessionId');
-        debugPrint('   📊 Final steps sent to /stop: $finalSteps');
-        debugPrint('   📊 Total synced via /sync:    $totalSyncedToBackend');
-        debugPrint('   $match');
-        if (syncedBreakdown.isNotEmpty) {
-          debugPrint('   📦 Synced breakdown: ${syncedBreakdown.join(', ')}');
-        }
-        debugPrint('   ⏰ endTime sent: $endTime');
-        debugPrint('   🪣 Target bucket of endTime: $hourBucket');
-        debugPrint('   📋 Full Stop payload: ${jsonEncode(stopData)}');
-        debugPrint('═══════════════════════════════════════════');
-        debugPrint('');
+        final reqTimestamp = DateTime.now().toIso8601String();
+        debugPrint('\n===================================================');
+        debugPrint('🚀 FIRE NETWORK SYNC -> PATCH /activity/session/stop');
+        debugPrint('   TIMESTAMP: $reqTimestamp');
+        debugPrint('   SESSION: $sessionId');
+        debugPrint('   EXACT JSON PAYLOAD LEAVING DEVICE:');
+        debugPrint('   ${jsonEncode(stopData)}');
+        debugPrint('   [INTERNAL] Final steps to /stop: $finalSteps');
+        debugPrint('   [INTERNAL] Total synced via /sync: $totalSyncedToBackend');
+        debugPrint('   [INTERNAL] Match: $match');
+        debugPrint('===================================================\n');
       } catch (_) {}
 
       final response = await _dio.patch(
         ApiConstants.activitySessionStop,
         data: stopData,
       );
+
+      final resTimestamp = DateTime.now().toIso8601String();
+      debugPrint('\n===================================================');
+      debugPrint('✅ RECEIVED RESPONSE <- PATCH /activity/session/stop');
+      debugPrint('   TIMESTAMP: $resTimestamp');
+      debugPrint('   STATUS CODE: ${response.statusCode}');
+      debugPrint('   BACKEND CONFIRMED SESSION STOP SAVED.');
+      debugPrint('===================================================\n');
+
     return _parseResponse(response.data);
   }
 
   static bool _isSyncing = false;
 
   // POST /activity/sync → send hourly delta buckets to server as an array
-  Future<void> syncHourlyBuckets(String sessionId) async {
+  Future<void> syncHourlyBuckets(String sessionId, {bool force = false}) async {
     if (sessionId.isEmpty || sessionId.startsWith('local_')) return;
     
     if (_isSyncing) {
@@ -175,11 +187,15 @@ class ActivityRemoteDatasource {
     // If the background service is running, IT owns syncing the hourly buckets.
     // If we sync from the foreground at the exact same time, we'll double-sync the delta
     // because both read the old `alreadySynced` value from SharedPreferences before either writes to it.
-    final service = FlutterBackgroundService();
-    final isBackgroundRunning = await service.isRunning();
-    if (isBackgroundRunning) {
-      debugPrint('⏭️ FG hourly skipped: background service owns hourly buckets (session=$sessionId)');
-      return;
+    if (!force) {
+      final service = FlutterBackgroundService();
+      final isBackgroundRunning = await service.isRunning();
+      if (isBackgroundRunning) {
+        debugPrint('⏭️ FG hourly skipped: background service owns hourly buckets (session=$sessionId)');
+        return;
+      }
+    } else {
+      debugPrint('🛡️ [FIX IN ACTION] Bypassing background check because force=true');
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -201,12 +217,16 @@ class ActivityRemoteDatasource {
     // Build hourlyData array with DELTAS (new steps since last successful sync)
     final List<Map<String, dynamic>> hourlyData = [];
 
-    for (int h = 0; h <= now.hour; h++) {
+    for (int h = 0; h < 24; h++) {
       final bucketKey = 'hourly_steps_${sessionId}_$h';
       final syncedKey = 'synced_hourly_steps_${sessionId}_$h';
       final totalSteps = prefs.getInt(bucketKey) ?? 0;
       final alreadySynced = prefs.getInt(syncedKey) ?? 0;
       final delta = totalSteps - alreadySynced;
+      
+      if (totalSteps > 0) {
+        debugPrint('   🔍 [MIDNIGHT DEBUG FG] Hour $h: total=$totalSteps, synced=$alreadySynced, delta=$delta');
+      }
 
       if (delta > 0) {
         final deltaCals = (delta * 0.045).round();
@@ -231,30 +251,41 @@ class ActivityRemoteDatasource {
       'hourlyData': hourlyData,
     };
 
-    debugPrint('');
-    debugPrint('═══════════════════════════════════════════');
-    debugPrint('📤 SYNC HOURLY BUCKETS (Array):');
-    debugPrint('   🔑 Session: $sessionId');
-    debugPrint('   📦 Buckets: ${hourlyData.length}');
-    debugPrint('   📋 Payload: ${jsonEncode(payload)}');
-    debugPrint('═══════════════════════════════════════════');
-    debugPrint('');
+    final reqTimestamp = DateTime.now().toIso8601String();
+    debugPrint('\n===================================================');
+    debugPrint('🚀 FIRE NETWORK SYNC -> POST /activity/sync');
+    debugPrint('   TIMESTAMP: $reqTimestamp');
+    debugPrint('   SESSION: $sessionId');
+    debugPrint('   EXACT JSON PAYLOAD LEAVING DEVICE:');
+    debugPrint('   ${jsonEncode(payload)}');
+    debugPrint('===================================================\n');
 
-    await _dio.post(
+    final response = await _dio.post(
       ApiConstants.activitySync,
       data: payload,
     );
 
+    final resTimestamp = DateTime.now().toIso8601String();
+    debugPrint('\n===================================================');
+    debugPrint('✅ RECEIVED RESPONSE <- POST /activity/sync');
+    debugPrint('   TIMESTAMP: $resTimestamp');
+    debugPrint('   STATUS CODE: ${response.statusCode}');
+    debugPrint('   BACKEND CONFIRMED SAVED. MARKING AS SYNCED LOCALLY.');
+    debugPrint('===================================================\n');
+
     // SUCCESS — mark these deltas as synced so we don't send them again
     for (final bucket in hourlyData) {
       final h = bucket['hour'] as int;
+      final stepsSent = bucket['steps'] as num;
       final syncedKey = 'synced_hourly_steps_${sessionId}_$h';
-      final bucketKey = 'hourly_steps_${sessionId}_$h';
-      final currentTotal = prefs.getInt(bucketKey) ?? 0;
-      await prefs.setInt(syncedKey, currentTotal);
+      
+      // FIX: Add exactly what we sent to the synced total, rather than reading the live bucket
+      // which might have increased while we were waiting for the network!
+      final currentSynced = prefs.getInt(syncedKey) ?? 0;
+      final newSynced = currentSynced + stepsSent.toInt();
+      await prefs.setInt(syncedKey, newSynced);
+      debugPrint('   ✅ MARKED HOUR $h SYNCED: +$stepsSent (Total now: $newSynced)');
     }
-
-    debugPrint('✅ syncHourlyBuckets: Sent ${hourlyData.length} buckets successfully');
     } finally {
       _isSyncing = false;
     }
@@ -275,8 +306,14 @@ class ActivityRemoteDatasource {
   // GET /activity/history
   Future<Map<String, dynamic>> getActivityHistory() async {
     final response = await _dio.get(ApiConstants.activityHistory);
-    return _parseResponse(response.data);
+    final parsed = _parseResponse(response.data);
+    debugPrint('\n===================================================');
+    debugPrint('📊 ACTIVITY HISTORY RESPONSE (FROM BACKEND):');
+    debugPrint('   Payload: ${jsonEncode(parsed)}');
+    debugPrint('===================================================\n');
+    return parsed;
   }
+
 
   // GET /activity/session/{id}
   Future<Map<String, dynamic>> getSessionById(String id) async {

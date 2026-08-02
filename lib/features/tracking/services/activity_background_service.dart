@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -35,9 +36,22 @@ void onStart(ServiceInstance service) async {
 
   // Recover accumulated steps from the foreground
   final prefsInit = await SharedPreferences.getInstance();
-  final sessionAccumulated = prefsInit.getInt('session_accumulated_steps') ?? 0;
-  accumulatedBefore = sessionAccumulated;
-  sessionDate = prefsInit.getString('session_date') ?? DateFormat('yyyy-MM-dd').format(DateTime.now());
+  final todayOnStart = DateFormat('yyyy-MM-dd').format(DateTime.now());
+  
+  sessionDate = prefsInit.getString('session_date') ?? todayOnStart;
+  
+  // FIX: App Restart Bug (Ghost gap 1280 steps in 62s).
+  // If the service is waking up on a NEW day, do NOT pull yesterday's dead-app steps into today!
+  if (sessionDate != todayOnStart) {
+    debugPrint('⚠️ BG Woke up on a new day ($todayOnStart). Clearing old pedometer accumulation from $sessionDate.');
+    accumulatedBefore = 0;
+    sessionDate = todayOnStart;
+    prefsInit.setInt('session_accumulated_steps', 0);
+    prefsInit.setString('session_date', todayOnStart);
+  } else {
+    accumulatedBefore = prefsInit.getInt('session_accumulated_steps') ?? 0;
+  }
+  
   debugPrint('🔄 BG: Started with accumulatedBefore=$accumulatedBefore');
 
   // Check if there's actually an active session
@@ -118,6 +132,60 @@ void onStart(ServiceInstance service) async {
 
   // ── MIDNIGHT CHECK ──
   // Checks if we've crossed midnight; if so, auto-reset steps for the new day
+  // Flushes hourly buckets for a specific session synchronously before stopping it
+  Future<void> _flushHourlyBucketsNow(SharedPreferences prefs, String sessionId, String token) async {
+    try {
+      final List<Map<String, dynamic>> hourlyData = [];
+      for (int h = 0; h < 24; h++) {
+        final bucketKey = 'hourly_steps_${sessionId}_$h';
+        final syncedKey = 'synced_hourly_steps_${sessionId}_$h';
+        final totalSteps = prefs.getInt(bucketKey) ?? 0;
+        final alreadySynced = prefs.getInt(syncedKey) ?? 0;
+        final delta = totalSteps - alreadySynced;
+        if (delta > 0) {
+          hourlyData.add({
+            'hour': h,
+            'steps': delta,
+            'calories': (delta * 0.045).round(),
+            'distance': double.parse((delta * 0.000762).toStringAsFixed(3)),
+          });
+        }
+      }
+      
+      if (hourlyData.isEmpty) return;
+
+      final dio = Dio(BaseOptions(
+        baseUrl: 'https://uat-api.theeasyfitclinics.com/api',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ));
+
+      final payload = {
+        'sessionId': sessionId,
+        'hourlyData': hourlyData,
+      };
+
+      debugPrint('🚀 MIDNIGHT FLUSH: $payload');
+      final response = await dio.post('/activity/sync', data: payload);
+      
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        for (final bucket in hourlyData) {
+          final h = bucket['hour'] as int;
+          final stepsSent = bucket['steps'] as num;
+          final syncedKey = 'synced_hourly_steps_${sessionId}_$h';
+          final currentSynced = prefs.getInt(syncedKey) ?? 0;
+          await prefs.setInt(syncedKey, currentSynced + stepsSent.toInt());
+        }
+        debugPrint('✅ MIDNIGHT FLUSH SUCCESS');
+      }
+    } catch (e) {
+      debugPrint('⚠️ MIDNIGHT FLUSH FAILED: $e');
+    }
+  }
+
   Future<bool> _checkMidnightReset() async {
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
     if (sessionDate != today) {
@@ -128,8 +196,19 @@ void onStart(ServiceInstance service) async {
       final currentSessionId = prefs.getString('active_session_id') ?? '';
       
       // Save final steps for the old day by doing a STOP session
-      final totalSteps = accumulatedBefore + currentSteps;
-      if (totalSteps > 0 && currentSessionId.isNotEmpty && token.isNotEmpty) {
+      // FIX: Use hourly bucket total as fallback — in-memory counters may be stale
+      // if Android killed and restarted the background service before midnight.
+      int hourlyBucketTotal = 0;
+      for (int h = 0; h < 24; h++) {
+        hourlyBucketTotal += prefs.getInt('hourly_steps_${currentSessionId}_$h') ?? 0;
+      }
+      final totalSteps = math.max(accumulatedBefore + currentSteps, hourlyBucketTotal);
+      
+      debugPrint('🛡️ [FIX IN ACTION] Midnight Stop: using $totalSteps steps (in-mem: ${accumulatedBefore + currentSteps}, hourly-fallback: $hourlyBucketTotal)');
+      final safeFinalSteps = [totalSteps, hourlyBucketTotal].reduce((a, b) => a > b ? a : b);
+      debugPrint('🌙 MIDNIGHT STOP: inMemory=$totalSteps, hourlyBuckets=$hourlyBucketTotal, safeFinal=$safeFinalSteps');
+      
+      if (currentSessionId.isNotEmpty && token.isNotEmpty) {
         try {
           final dio = Dio(BaseOptions(
             baseUrl: 'https://uat-api.theeasyfitclinics.com/api',
@@ -139,16 +218,18 @@ void onStart(ServiceInstance service) async {
               'Authorization': 'Bearer $token',
             },
           ));
+          // FLUSH hourly buckets for the old session before stopping it!
+          await _flushHourlyBucketsNow(prefs, currentSessionId, token);
           
           // STOP the session → commits steps to stats/reports
           await dio.patch('/activity/session/stop', data: {
             'sessionId': currentSessionId,
             'endTime': DateTime.now().subtract(const Duration(seconds: 1)).toIso8601String(),
-            'finalSteps': totalSteps,
-            'finalCalories': (totalSteps * 0.045).round(),
-            'finalDistance': double.parse((totalSteps * 0.000762).toStringAsFixed(3)),
+            'finalSteps': safeFinalSteps,
+            'finalCalories': (safeFinalSteps * 0.045).round(),
+            'finalDistance': double.parse((safeFinalSteps * 0.000762).toStringAsFixed(3)),
           });
-          debugPrint('✅ Midnight: stopped old day session with $totalSteps steps');
+          debugPrint('✅ Midnight: stopped old day session with $safeFinalSteps steps');
           
           // START a fresh session for the new day
           final startResp = await dio.post('/activity/session/start', data: {
@@ -191,10 +272,8 @@ void onStart(ServiceInstance service) async {
       await prefs.setInt('session_accumulated_steps', 0);
       await prefs.setString('session_date', today);
       await prefs.setInt('synced_steps_offset', 0);
-      // Clear hourly step data for the new day
-      for (final key in prefs.getKeys().where((key) => key.startsWith('hourly_')).toList()) {
-        await prefs.remove(key);
-      }
+      // DO NOT clear hourly step data here! If we blindly delete them, any unsynced steps are permanently lost!
+      // Old session data will sit safely in SharedPreferences (and we already flushed it above).
       
       updateNotification();
       return true;
@@ -442,12 +521,16 @@ void onStart(ServiceInstance service) async {
       final now = DateTime.now();
       final List<Map<String, dynamic>> hourlyData = [];
 
-      for (int h = 0; h <= now.hour; h++) {
+      for (int h = 0; h < 24; h++) {
         final bucketKey = 'hourly_steps_${activeSessionId}_$h';
         final syncedKey = 'synced_hourly_steps_${activeSessionId}_$h';
         final totalSteps = prefs.getInt(bucketKey) ?? 0;
         final alreadySynced = prefs.getInt(syncedKey) ?? 0;
         final delta = totalSteps - alreadySynced;
+
+        if (totalSteps > 0) {
+          debugPrint('   🔍 [MIDNIGHT DEBUG BG] Hour $h: total=$totalSteps, synced=$alreadySynced, delta=$delta');
+        }
 
         if (delta > 0) {
           final deltaCals = (delta * 0.045).round();

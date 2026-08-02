@@ -13,6 +13,6 @@ abstract class TrackingRepository {
     required double finalDistance,
   });
   Future<Map<String, dynamic>> getSessionById(String id);
-  Future<void> syncHourlyBuckets(String sessionId);
+  Future<void> syncHourlyBuckets(String sessionId, {bool force = false});
   Future<Map<String, dynamic>> getActivityProgress();
 }

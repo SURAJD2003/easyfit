@@ -207,22 +207,34 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
     _sessionGeneration++;
     _debounce?.cancel();
     _isTracking = true;
-    _accumulatedSteps = accumulatedTotal;
-    _baseSteps = -1; // will re-calibrate on next pedometer event
-    _lastSyncedSteps = 0; // allow immediate sync of new steps
-    _lastMilestone = (accumulatedTotal ~/ 1000) * 1000;
-    _sessionDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    state = AsyncValue.data(accumulatedTotal);
-    // Persist so BG service + crash recovery have the right starting point
-    _persistSteps(accumulatedTotal);
+    
+    // FIX: App Restart Bug. Do not pull old steps into a new day!
     SharedPreferences.getInstance().then((prefs) {
+      final savedDate = prefs.getString('session_date') ?? '';
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      if (savedDate.isNotEmpty && savedDate != today) {
+        debugPrint('⚠️ Pedometer Woke up on new day ($today). Clearing old accumulation from $savedDate.');
+        _accumulatedSteps = 0;
+      } else {
+        _accumulatedSteps = accumulatedTotal;
+      }
+      
+      _baseSteps = -1; // will re-calibrate on next pedometer event
+      _lastSyncedSteps = 0; // allow immediate sync of new steps
+      _lastMilestone = (_accumulatedSteps ~/ 1000) * 1000;
+      _sessionDate = today;
+      state = AsyncValue.data(_accumulatedSteps);
+      
+      // Persist so BG service + crash recovery have the right starting point
+      _persistSteps(_accumulatedSteps);
       prefs.setString('session_date', _sessionDate);
+      
+      // Ensure pedometer stream is alive
+      if (_subscription == null) {
+        _startListening();
+      }
+      debugPrint('🔄 Pedometer: resumed with accumulated $_accumulatedSteps steps');
     });
-    // Ensure pedometer stream is alive
-    if (_subscription == null) {
-      _startListening();
-    }
-    debugPrint('🔄 Pedometer: resumed with accumulated $accumulatedTotal steps');
   }
 
   /// Get the current session steps only (for API stop calls)

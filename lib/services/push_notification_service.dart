@@ -12,18 +12,22 @@ import '../core/api_client.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  debugPrint('Handling a background message: ${message.messageId}');
+  debugPrint('===================================================');
+  debugPrint('📥 FCM BACKGROUND MESSAGE RECEIVED: ${message.messageId}');
+  debugPrint('📥 FCM DATA: ${message.data}');
   
   final type = message.data['type'] ?? message.data['Type'] ?? '';
   if (type == 'sync_request' || type == 'sync_steps') {
     debugPrint('🔄 FCM BACKGROUND: Triggering silent pedometer sync...');
     await _performSilentSync();
   }
+  debugPrint('===================================================');
 }
 
 bool _isFcmSyncing = false;
 
 Future<void> _performSilentSync() async {
+  debugPrint('🏃‍♂️ FCM _performSilentSync() STARTED');
   try {
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload();
@@ -31,17 +35,27 @@ Future<void> _performSilentSync() async {
     final sessionId = prefs.getString('active_session_id') ?? '';
 
     if (token.isEmpty || sessionId.isEmpty || sessionId.startsWith('local_')) {
+      debugPrint('⏭️ FCM Silent Sync Aborted: No token or valid sessionId ($sessionId)');
       return;
     }
 
     final steps = prefs.getInt('session_accumulated_steps') ?? 0;
-    if (steps <= 0) return;
+    if (steps <= 0) {
+      debugPrint('⏭️ FCM Silent Sync Aborted: No accumulated steps');
+      return;
+    }
 
     final service = FlutterBackgroundService();
     final isBackgroundRunning = await service.isRunning();
-    if (isBackgroundRunning) return;
+    if (isBackgroundRunning) {
+      debugPrint('⏭️ FCM Silent Sync Aborted: Background pedometer service is already running and owns syncing');
+      return;
+    }
 
-    if (_isFcmSyncing) return;
+    if (_isFcmSyncing) {
+      debugPrint('⏭️ FCM Silent Sync Aborted: Sync already in progress');
+      return;
+    }
     _isFcmSyncing = true;
     
     final dio = Dio(BaseOptions(
@@ -55,7 +69,7 @@ Future<void> _performSilentSync() async {
 
     final List<Map<String, dynamic>> hourlyData = [];
     final now = DateTime.now();
-    for (int h = 0; h <= now.hour; h++) {
+    for (int h = 0; h < 24; h++) {
       final bucketKey = 'hourly_steps_${sessionId}_$h';
       final syncedKey = 'synced_hourly_steps_${sessionId}_$h';
       final totalSteps = prefs.getInt(bucketKey) ?? 0;
@@ -71,15 +85,20 @@ Future<void> _performSilentSync() async {
           'calories': deltaCals,
           'distance': deltaDist,
         });
+        debugPrint('   📦 FCM Syncing Hour $h: delta=$delta');
       }
     }
 
-    if (hourlyData.isEmpty) return;
+    if (hourlyData.isEmpty) {
+      debugPrint('⏭️ FCM Silent Sync: No new offline data to send.');
+      return;
+    }
 
     final payload = {
       'sessionId': sessionId,
       'hourlyData': hourlyData,
     };
+    debugPrint('🚀 FCM Pushing offline payload: ${jsonEncode(payload)}');
 
     final response = await dio.post('/activity/sync', data: payload);
 
@@ -91,12 +110,15 @@ Future<void> _performSilentSync() async {
         final currentTotal = prefs.getInt(bucketKey) ?? 0;
         await prefs.setInt(syncedKey, currentTotal);
       }
-      debugPrint('✅ FCM Silent Sync Success');
+      debugPrint('✅ FCM Silent Sync Success: Server accepted ${hourlyData.length} buckets');
+    } else {
+      debugPrint('❌ FCM Silent Sync failed with status: ${response.statusCode}');
     }
   } catch (e) {
-    debugPrint('❌ FCM Silent Sync Failed: $e');
+    debugPrint('❌ FCM Silent Sync Exception: $e');
   } finally {
     _isFcmSyncing = false;
+    debugPrint('🏁 FCM _performSilentSync() FINISHED');
   }
 }
 

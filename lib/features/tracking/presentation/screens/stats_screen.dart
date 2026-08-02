@@ -142,10 +142,17 @@ class _StatsScreenState extends ConsumerState<StatsScreen>
       debugPrint('   Total steps reported by API: ${data['totalSteps']}');
       
       final List<double> hourly = List.filled(24, 0.0);
+      final currentHour = DateTime.now().hour;
+      
       for (final h in hours) {
         final hourIndex = (h['hour'] as num?)?.toInt() ?? -1;
         final steps = (h['steps'] as num?)?.toDouble() ?? 0.0;
         if (hourIndex >= 0 && hourIndex < 24) {
+          // 🛡️ Block future hours from being displayed for today (backend bug defense)
+          if (today == DateTime.now().toIso8601String().split('T')[0] && hourIndex > currentHour) {
+            continue;
+          }
+          
           hourly[hourIndex] = steps;
           if (steps > 0 || (h['hasActivity'] == true)) {
             debugPrint('   👉 Bucket Hour $hourIndex (${h['label']}): $steps steps (hasActivity=${h['hasActivity']})');

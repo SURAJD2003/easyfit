@@ -1821,6 +1821,82 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final sessionId = prefs.getString('active_session_id');
     final hasSession = sessionId != null && sessionId.isNotEmpty;
     
+    // ── CHECK FOR MISSED MIDNIGHT ──
+    // If the app was backgrounded across midnight, the Timer may not have fired.
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final sessionDate = prefs.getString('session_date') ?? today;
+    final completedDate = prefs.getString('completed_steps_date') ?? '';
+    
+    if (hasSession && (sessionDate != today || (completedDate.isNotEmpty && completedDate != today))) {
+      debugPrint('🌙 _refreshTrackingState: missed midnight! session from $sessionDate, completed from $completedDate, today=$today');
+      
+      // Reset local daily counters immediately
+      _lastCompletedSteps = 0;
+      await prefs.remove('completed_steps_today');
+      await prefs.remove('completed_steps_date');
+      for (int h = 0; h < 24; h++) {
+        await prefs.remove('hourly_steps_$h');
+      }
+      
+      // Reset pedometer
+      ref.read(pedometerProvider.notifier).resetForNewDay();
+      
+      // Stop old session + start new one
+      final online = await _isOnline();
+      final isLocalSession = sessionId!.startsWith('local_');
+      
+      if (online && !isLocalSession) {
+        try {
+          final repo = ref.read(trackingRepositoryProvider);
+          
+          // Compute safe finalSteps from hourly buckets
+          int hourlyBucketTotal = 0;
+          for (int h = 0; h < 24; h++) {
+            hourlyBucketTotal += prefs.getInt('hourly_steps_${sessionId}_$h') ?? 0;
+          }
+          final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
+          final safeFinalSteps = [bgAccumulatedSteps, hourlyBucketTotal].reduce(math.max);
+          
+          debugPrint('🌙 Resume: stopping stale session $sessionId with safeFinal=$safeFinalSteps');
+          
+          // Sync hourly buckets first
+          try { 
+            debugPrint('🛡️ [FIX IN ACTION] FORCING final hourly sync before stopping stale session!');
+            await repo.syncHourlyBuckets(sessionId, force: true); 
+          } catch (_) {}
+          
+          // Stop the old session
+          await repo.stopSession(
+            sessionId: sessionId,
+            finalSteps: safeFinalSteps,
+            finalCalories: (safeFinalSteps * 0.045).round(),
+            finalDistance: double.parse((safeFinalSteps * 0.000762).toStringAsFixed(3)),
+          );
+        } catch (e) {
+          debugPrint('⚠️ Resume: failed to stop old session: $e');
+        }
+      }
+      
+      // Clear old session data
+      await prefs.remove('active_session_id');
+      await prefs.remove('session_accumulated_steps');
+      await prefs.setString('session_date', today);
+      await prefs.setInt('synced_steps_offset', 0);
+      
+      // Start fresh session
+      ref.read(pedometerProvider.notifier).startSession();
+      await _autoStartSession();
+      
+      // Re-schedule midnight timer
+      _scheduleMidnightReset();
+      
+      // Refresh dashboard
+      ref.read(dashboardProvider.notifier).refresh();
+      
+      debugPrint('🌙 Resume: midnight recovery complete');
+      return;
+    }
+    
     if (mounted) {
       setState(() {
         _isTracking = hasSession;
@@ -1859,7 +1935,71 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       await Permission.activityRecognition.request();
       await Permission.ignoreBatteryOptimizations.request();
       
-      // ── REUSE existing session — don't create a new one! ──
+      // ── DATE CHECK: Is this session from yesterday? ──
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final sessionDate = prefs.getString('session_date') ?? today;
+      
+      if (sessionDate != today) {
+        // SESSION IS FROM A PREVIOUS DAY — must stop old and start new!
+        debugPrint('🌙 _checkActiveSession: old session from $sessionDate detected on $today — doing stop→start');
+        
+        // 1. Reset completed steps for the new day
+        _lastCompletedSteps = 0;
+        await prefs.remove('completed_steps_today');
+        await prefs.remove('completed_steps_date');
+        for (int h = 0; h < 24; h++) {
+          await prefs.remove('hourly_steps_$h');
+        }
+        
+        // 2. Stop old session with hourly bucket fallback
+        final online = await _isOnline();
+        final isLocalSession = sessionId.startsWith('local_');
+        
+        if (online && !isLocalSession) {
+          try {
+            final repo = ref.read(trackingRepositoryProvider);
+            
+            // Compute safe finalSteps from hourly buckets
+            int hourlyBucketTotal = 0;
+            for (int h = 0; h < 24; h++) {
+              hourlyBucketTotal += prefs.getInt('hourly_steps_${sessionId}_$h') ?? 0;
+            }
+            final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
+            final safeFinalSteps = [bgAccumulatedSteps, hourlyBucketTotal].reduce(math.max);
+            
+            debugPrint('🌙 Stopping stale session $sessionId: bgAccum=$bgAccumulatedSteps, hourlyBuckets=$hourlyBucketTotal, safeFinal=$safeFinalSteps');
+            
+            // Sync hourly buckets first
+            try { await repo.syncHourlyBuckets(sessionId, force: true); } catch (_) {}
+            
+            // Stop the old session
+            await repo.stopSession(
+              sessionId: sessionId,
+              finalSteps: safeFinalSteps,
+              finalCalories: (safeFinalSteps * 0.045).round(),
+              finalDistance: double.parse((safeFinalSteps * 0.000762).toStringAsFixed(3)),
+            );
+            debugPrint('✅ Old day session stopped with $safeFinalSteps steps');
+          } catch (e) {
+            debugPrint('⚠️ Failed to stop old day session: $e');
+          }
+        }
+        
+        // 3. Clear old session data
+        await prefs.remove('active_session_id');
+        await prefs.remove('session_accumulated_steps');
+        await prefs.setString('session_date', today);
+        await prefs.setInt('synced_steps_offset', 0);
+        
+        // 4. Reset pedometer and start fresh
+        ref.read(pedometerProvider.notifier).startSession();
+        
+        // 5. Start a new backend session
+        await _autoStartSession();
+        return;
+      }
+      
+      // ── SAME DAY: REUSE existing session — don't create a new one! ──
       // The session is already valid locally. Just resume pedometer tracking
       // and ensure the background service is running.
       debugPrint('✅ Resuming existing session: $sessionId');
