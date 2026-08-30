@@ -158,19 +158,18 @@ class PushNotificationService {
           ?.createNotificationChannel(channel);
 
       // 3. Configure FCM foreground message handler
+      // 3. Configure FCM foreground message handler
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        debugPrint('Got a message whilst in the foreground!');
-        
+        debugPrint('Got a message whilst in the foreground: ${message.data}');
+
         final type = message.data['type'] ?? message.data['Type'] ?? '';
         if (type == 'sync_request' || type == 'sync_steps') {
           debugPrint('🔄 FCM FOREGROUND: Triggering silent pedometer sync...');
           _performSilentSync();
+          return;
         }
 
-        if (message.notification != null) {
-          debugPrint('Message also contained a notification: ${message.notification}');
-          _showLocalNotification(message, channel);
-        }
+        _showLocalNotification(message, channel);
       });
 
       // 4. Handle initial message (if app was opened via a notification)
@@ -187,66 +186,110 @@ class PushNotificationService {
       // 6. Get the FCM Token
       final token = await _firebaseMessaging.getToken();
       debugPrint('FCM Token: $token');
-      
-      // We will register the token with the backend separately after login
+
+      // Check if admin is currently logged in and subscribe to topics
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString('admin_token') != null) {
+        await subscribeToAdminTopics();
+      }
+
       _isInitialized = true;
     } catch (e) {
       debugPrint('Error initializing PushNotificationService: $e');
     }
   }
 
-  Future<void> registerTokenWithBackend() async {
+  Future<void> subscribeToAdminTopics() async {
+    if (kIsWeb) return;
+    try {
+      await _firebaseMessaging.subscribeToTopic('admin');
+      await _firebaseMessaging.subscribeToTopic('admin_notifications');
+      await _firebaseMessaging.subscribeToTopic('new_signup');
+      await _firebaseMessaging.subscribeToTopic('new_users');
+      debugPrint('✅ Subscribed to admin FCM topics: admin, admin_notifications, new_signup, new_users');
+    } catch (e) {
+      debugPrint('❌ Failed to subscribe to admin topics: $e');
+    }
+  }
+
+  Future<void> unsubscribeFromAdminTopics() async {
+    if (kIsWeb) return;
+    try {
+      await _firebaseMessaging.unsubscribeFromTopic('admin');
+      await _firebaseMessaging.unsubscribeFromTopic('admin_notifications');
+      await _firebaseMessaging.unsubscribeFromTopic('new_signup');
+      await _firebaseMessaging.unsubscribeFromTopic('new_users');
+      debugPrint('✅ Unsubscribed from admin FCM topics');
+    } catch (e) {
+      debugPrint('❌ Failed to unsubscribe from admin topics: $e');
+    }
+  }
+
+  Future<void> registerTokenWithBackend({bool isAdmin = false}) async {
+    if (kIsWeb) return;
     try {
       final token = await _firebaseMessaging.getToken();
       if (token == null) return;
-      
+
       final dio = ApiClient().dio;
-      // Also try to get admin token if it exists
       final prefs = await SharedPreferences.getInstance();
       final authStr = prefs.getString('auth_token');
       final adminStr = prefs.getString('admin_token');
-      final activeToken = authStr ?? adminStr;
-      
+      final activeToken = isAdmin ? (adminStr ?? authStr) : (authStr ?? adminStr);
+
       if (activeToken != null) {
-        // Temporarily set the token in Dio for this request if ApiClient doesn't have it
         dio.options.headers['Authorization'] = 'Bearer $activeToken';
       }
 
       await dio.post('/notifications/register', data: {
         'fcmToken': token,
         'platform': Platform.operatingSystem,
+        'role': isAdmin || adminStr != null ? 'admin' : 'user',
       });
-      debugPrint('Successfully registered FCM token with backend.');
+      debugPrint('Successfully registered FCM token with backend (role: ${isAdmin || adminStr != null ? "admin" : "user"}).');
     } catch (e) {
       debugPrint('Failed to register FCM token with backend: $e');
     }
   }
 
-  void _showLocalNotification(RemoteMessage message, AndroidNotificationChannel channel) {
-    final notification = message.notification;
-    final android = message.notification?.android;
+  void _showLocalNotification(
+      RemoteMessage message, AndroidNotificationChannel channel) {
+    if (kIsWeb) return;
 
-    if (notification != null && android != null && !kIsWeb) {
-      _localNotificationsPlugin.show(
-        notification.hashCode,
-        notification.title,
-        notification.body,
-        NotificationDetails(
-          android: AndroidNotificationDetails(
-            channel.id,
-            channel.name,
-            channelDescription: channel.description,
-            icon: android.smallIcon ?? '@mipmap/ic_launcher',
-          ),
-          iOS: const DarwinNotificationDetails(
-            presentAlert: true,
-            presentBadge: true,
-            presentSound: true,
-          ),
+    final title = message.notification?.title ??
+        message.data['title'] ??
+        message.data['Title'] ??
+        'EasyFit Notification';
+    final body = message.notification?.body ??
+        message.data['body'] ??
+        message.data['Body'] ??
+        message.data['message'] ??
+        '';
+
+    if (title.isEmpty && body.isEmpty) return;
+
+    _localNotificationsPlugin.show(
+      message.hashCode,
+      title,
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          channel.id,
+          channel.name,
+          channelDescription: channel.description,
+          icon: message.notification?.android?.smallIcon ??
+              '@mipmap/ic_launcher',
+          importance: Importance.max,
+          priority: Priority.high,
         ),
-        payload: jsonEncode(message.data),
-      );
-    }
+        iOS: const DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
+        ),
+      ),
+      payload: jsonEncode(message.data),
+    );
   }
 
   void _onNotificationTap(NotificationResponse response) {

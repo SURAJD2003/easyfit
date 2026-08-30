@@ -16,22 +16,57 @@ class SubscriptionModel extends SubscriptionEntity {
   });
 
   factory SubscriptionModel.fromJson(Map<String, dynamic> json) {
+    final rawExpiry = json['expiryDate'] ??
+        json['dueDate'] ??
+        json['expiresAt'] ??
+        json['due_date'] ??
+        json['expiry_date'] ??
+        json['nextBillingDate'] ??
+        json['validUntil'];
+
+    final rawRequested = json['requestedAt'] ??
+        json['createdAt'] ??
+        json['created_at'] ??
+        json['startDate'] ??
+        json['start_date'];
+
+    final rawResolved = json['resolvedAt'] ??
+        json['updatedAt'] ??
+        json['updated_at'] ??
+        json['approvedAt'];
+
     return SubscriptionModel(
-      id: json['id']?.toString() ?? json['subscriptionId']?.toString() ?? '',
-      userId: json['userId']?.toString() ?? '',
-      userName: json['userName']?.toString() ?? 'Unknown User',
-      userEmail: json['userEmail']?.toString() ?? json['userPhone']?.toString() ?? '',
-      plan: json['plan']?.toString() ?? 'free',
+      id: json['id']?.toString() ??
+          json['_id']?.toString() ??
+          json['subscriptionId']?.toString() ??
+          json['userId']?.toString() ??
+          '',
+      userId: json['userId']?.toString() ?? json['_id']?.toString() ?? '',
+      userName: json['userName']?.toString() ??
+          json['name']?.toString() ??
+          json['user_name']?.toString() ??
+          json['fullName']?.toString() ??
+          'Unknown User',
+      userEmail: json['userEmail']?.toString() ??
+          json['email']?.toString() ??
+          json['user_email']?.toString() ??
+          json['userPhone']?.toString() ??
+          json['phone']?.toString() ??
+          json['mobile']?.toString() ??
+          '',
+      plan: json['plan']?.toString() ??
+          json['planId']?.toString() ??
+          json['planName']?.toString() ??
+          'free',
       status: json['status']?.toString() ?? 'pending',
-      requestedAt: json['requestedAt'] != null
-          ? DateTime.tryParse(json['requestedAt'].toString())
+      requestedAt: rawRequested != null
+          ? DateTime.tryParse(rawRequested.toString())
           : null,
-      resolvedAt: json['resolvedAt'] != null
-          ? DateTime.tryParse(json['resolvedAt'].toString())
+      resolvedAt: rawResolved != null
+          ? DateTime.tryParse(rawResolved.toString())
           : null,
-      expiryDate: json['expiryDate'] != null
-          ? DateTime.tryParse(json['expiryDate'].toString())
-          : null,
+      expiryDate:
+          rawExpiry != null ? DateTime.tryParse(rawExpiry.toString()) : null,
       note: json['note']?.toString(),
       reason: json['reason']?.toString(),
     );

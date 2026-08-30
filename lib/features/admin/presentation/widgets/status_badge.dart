@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum BadgeType { active, inactive, pending, approved, rejected, free, premium }
+enum BadgeType { active, inactive, pending, approved, rejected, free, premium, due, expired }
 
 class StatusBadge extends StatelessWidget {
   final BadgeType type;
@@ -28,6 +28,10 @@ class StatusBadge extends StatelessWidget {
         return const StatusBadge(type: BadgeType.free);
       case 'premium':
         return const StatusBadge(type: BadgeType.premium);
+      case 'due':
+        return const StatusBadge(type: BadgeType.due);
+      case 'expired':
+        return const StatusBadge(type: BadgeType.expired);
       default:
         return StatusBadge(
           type: BadgeType.inactive,
@@ -43,9 +47,12 @@ class StatusBadge extends StatelessWidget {
         return const Color(0xFF1A3A1A);
       case BadgeType.inactive:
       case BadgeType.rejected:
+      case BadgeType.expired:
         return const Color(0xFF3A1A1A);
       case BadgeType.pending:
         return const Color(0xFF3A2A0A);
+      case BadgeType.due:
+        return const Color(0xFF3A2A00);
       case BadgeType.premium:
         return const Color(0xFF2A1A3A);
       case BadgeType.free:
@@ -60,9 +67,12 @@ class StatusBadge extends StatelessWidget {
         return const Color(0xFF4CAF50);
       case BadgeType.inactive:
       case BadgeType.rejected:
+      case BadgeType.expired:
         return const Color(0xFFFF5252);
       case BadgeType.pending:
         return const Color(0xFFFF6B00);
+      case BadgeType.due:
+        return const Color(0xFFFFB300);
       case BadgeType.premium:
         return const Color(0xFFAB7EFF);
       case BadgeType.free:
@@ -87,6 +97,10 @@ class StatusBadge extends StatelessWidget {
         return 'Free';
       case BadgeType.premium:
         return 'Premium';
+      case BadgeType.due:
+        return 'Due';
+      case BadgeType.expired:
+        return 'Expired';
     }
   }
 

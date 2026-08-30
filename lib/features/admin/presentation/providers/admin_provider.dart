@@ -128,8 +128,37 @@ class SubscriptionsState {
 
   List<SubscriptionEntity> getSubscriptionsForTab(String tabStatus) {
     var filtered = subscriptions;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
     if (tabStatus != 'all') {
-      filtered = filtered.where((s) => s.status.toLowerCase() == tabStatus.toLowerCase()).toList();
+      final target = tabStatus.toLowerCase();
+      if (target == 'expired') {
+        filtered = filtered.where((s) {
+          final isStatusExpired = s.status.toLowerCase() == 'expired';
+          final isDateExpired =
+              s.expiryDate != null && s.expiryDate!.isBefore(today);
+          return isStatusExpired || isDateExpired;
+        }).toList();
+      } else if (target == 'due') {
+        filtered = filtered.where((s) {
+          // If already expired in the past, it belongs exclusively in 'Expired'
+          final isDateExpired =
+              s.expiryDate != null && s.expiryDate!.isBefore(today);
+          final isStatusExpired = s.status.toLowerCase() == 'expired';
+          if (isDateExpired || isStatusExpired) return false;
+
+          final isStatusDue = s.status.toLowerCase() == 'due';
+          final isUpcoming =
+              s.expiryDate != null && !s.expiryDate!.isBefore(today);
+
+          return isStatusDue || isUpcoming;
+        }).toList();
+      } else {
+        filtered = filtered
+            .where((s) => s.status.toLowerCase() == target)
+            .toList();
+      }
     }
     if (searchQuery.isNotEmpty) {
       final query = searchQuery.toLowerCase();
@@ -325,21 +354,24 @@ class AdminProvider extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('active_session_id'); // Clear any tracking session
 
-        final service = FlutterBackgroundService();
-        if (await service.isRunning()) {
-          service.invoke('stopService');
-          // Try again after a delay to handle race conditions
-          Future.delayed(const Duration(seconds: 2), () async {
-            if (await service.isRunning()) {
-              service.invoke('stopService');
-            }
-          });
+        if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+          final service = FlutterBackgroundService();
+          if (await service.isRunning()) {
+            service.invoke('stopService');
+            // Try again after a delay to handle race conditions
+            Future.delayed(const Duration(seconds: 2), () async {
+              if (await service.isRunning()) {
+                service.invoke('stopService');
+              }
+            });
+          }
         }
       } catch (e) {
         debugPrint('Failed to stop background service: $e');
       }
       
-      PushNotificationService().registerTokenWithBackend();
+      PushNotificationService().subscribeToAdminTopics();
+      PushNotificationService().registerTokenWithBackend(isAdmin: true);
       notifyListeners();
       return true;
     } catch (e) {
@@ -370,26 +402,30 @@ class AdminProvider extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('active_session_id'); // Clear any tracking session
 
-        final service = FlutterBackgroundService();
-        if (await service.isRunning()) {
-          service.invoke('stopService');
-          // Try again after a delay to handle race conditions
-          Future.delayed(const Duration(seconds: 2), () async {
-            if (await service.isRunning()) {
-              service.invoke('stopService');
-            }
-          });
+        if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+          final service = FlutterBackgroundService();
+          if (await service.isRunning()) {
+            service.invoke('stopService');
+            // Try again after a delay to handle race conditions
+            Future.delayed(const Duration(seconds: 2), () async {
+              if (await service.isRunning()) {
+                service.invoke('stopService');
+              }
+            });
+          }
         }
       } catch (e) {
         debugPrint('Failed to stop background service: $e');
       }
       
-      PushNotificationService().registerTokenWithBackend();
+      PushNotificationService().subscribeToAdminTopics();
+      PushNotificationService().registerTokenWithBackend(isAdmin: true);
       notifyListeners();
     }
   }
 
   Future<void> logout() async {
+    PushNotificationService().unsubscribeFromAdminTopics();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('admin_token');
     await prefs.remove('admin_id');
@@ -539,32 +575,83 @@ class AdminProvider extends ChangeNotifier {
     try {
       final repo = _buildRepo();
       final regular = await repo.getSubscriptions();
-      
-      List<SubscriptionEntity> combined = List.from(regular);
-      
+
+      final Map<String, SubscriptionEntity> subMap = {};
+      int autoIdCounter = 0;
+
+      for (final s in regular) {
+        final key = s.id.isNotEmpty
+            ? s.id
+            : (s.userId.isNotEmpty ? s.userId : 'sub_${autoIdCounter++}');
+        subMap[key] = s;
+      }
+
       try {
         final due = await repo.getDueSubscriptions();
-        final List<SubscriptionEntity> mappedDue = due.map<SubscriptionEntity>((e) => SubscriptionModel(
-          id: e.id,
-          userId: e.userId,
-          userName: e.userName,
-          userEmail: e.userEmail,
-          plan: e.plan,
-          status: 'due',
-          requestedAt: e.requestedAt,
-          resolvedAt: e.resolvedAt,
-          expiryDate: e.expiryDate,
-          note: e.note,
-          reason: e.reason,
-        )).toList();
-        
-        combined.addAll(mappedDue);
+        final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day);
+
+        for (final e in due) {
+          final key = e.id.isNotEmpty
+              ? e.id
+              : (e.userId.isNotEmpty ? e.userId : 'due_${autoIdCounter++}');
+          final existing = subMap[key];
+          final expDate = e.expiryDate ?? existing?.expiryDate;
+          final isExpiredDate = expDate != null && expDate.isBefore(today);
+
+          subMap[key] = SubscriptionModel(
+            id: e.id.isNotEmpty ? e.id : key,
+            userId: e.userId.isNotEmpty ? e.userId : (existing?.userId ?? ''),
+            userName: e.userName != 'Unknown User'
+                ? e.userName
+                : (existing?.userName ?? e.userName),
+            userEmail: e.userEmail.isNotEmpty
+                ? e.userEmail
+                : (existing?.userEmail ?? ''),
+            plan: e.plan.isNotEmpty ? e.plan : (existing?.plan ?? 'free'),
+            status: isExpiredDate ? 'expired' : 'due',
+            requestedAt: e.requestedAt ?? existing?.requestedAt,
+            resolvedAt: e.resolvedAt ?? existing?.resolvedAt,
+            expiryDate: expDate,
+            note: e.note ?? existing?.note,
+            reason: e.reason ?? existing?.reason,
+          );
+        }
       } catch (e) {
         debugPrint('Failed to fetch due subscriptions: $e');
       }
 
+      try {
+        final expired = await repo.getExpiredSubscriptions();
+        for (final e in expired) {
+          final key = e.id.isNotEmpty
+              ? e.id
+              : (e.userId.isNotEmpty ? e.userId : 'exp_${autoIdCounter++}');
+          final existing = subMap[key];
+          subMap[key] = SubscriptionModel(
+            id: e.id.isNotEmpty ? e.id : key,
+            userId: e.userId.isNotEmpty ? e.userId : (existing?.userId ?? ''),
+            userName: e.userName != 'Unknown User'
+                ? e.userName
+                : (existing?.userName ?? e.userName),
+            userEmail: e.userEmail.isNotEmpty
+                ? e.userEmail
+                : (existing?.userEmail ?? ''),
+            plan: e.plan.isNotEmpty ? e.plan : (existing?.plan ?? 'free'),
+            status: 'expired',
+            requestedAt: e.requestedAt ?? existing?.requestedAt,
+            resolvedAt: e.resolvedAt ?? existing?.resolvedAt,
+            expiryDate: e.expiryDate ?? existing?.expiryDate,
+            note: e.note ?? existing?.note,
+            reason: e.reason ?? existing?.reason,
+          );
+        }
+      } catch (_) {
+        // Endpoint /admin/expiredSubscriptions not available on backend; expired items are automatically filtered from the main list.
+      }
+
       _subscriptionsState = _subscriptionsState.copyWith(
-        subscriptions: combined,
+        subscriptions: subMap.values.toList(),
         isLoading: false,
       );
     } catch (e) {

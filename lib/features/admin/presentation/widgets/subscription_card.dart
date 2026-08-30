@@ -21,87 +21,113 @@ class SubscriptionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final isExpired = subscription.status == 'expired' ||
+        (subscription.expiryDate != null &&
+            subscription.expiryDate!.isBefore(today));
+    final isDue = !isExpired &&
+        (subscription.status == 'due' ||
+            (subscription.expiryDate != null &&
+                subscription.expiryDate!.difference(today).inDays <= 30));
+
+    final badgeStatus = isExpired
+        ? 'expired'
+        : (isDue ? 'due' : subscription.status);
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.06)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // User info row
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      subscription.userName,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subscription.userEmail,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.5),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              StatusBadge.fromString(subscription.status),
-            ],
+        decoration: BoxDecoration(
+          color: _cardColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isExpired
+                ? Colors.redAccent.withOpacity(0.3)
+                : isDue
+                    ? const Color(0xFFFFB300).withOpacity(0.3)
+                    : Colors.white.withOpacity(0.06),
           ),
-          const SizedBox(height: 12),
-          // Plan and dates row
-          Row(
-            children: [
-              Expanded(
-                child: _InfoChip(
-                  label: 'Plan',
-                  value: subscription.plan.toUpperCase(),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _InfoChip(
-                  label: 'Requested',
-                  value: subscription.requestedAt != null
-                      ? _formatDate(subscription.requestedAt!)
-                      : 'N/A',
-                ),
-              ),
-              if (subscription.status == 'approved' && subscription.expiryDate != null) ...[
-                const SizedBox(width: 12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // User info row
+            Row(
+              children: [
                 Expanded(
-                  child: _InfoChip(
-                    label: 'Due Date',
-                    value: _formatDate(subscription.expiryDate!),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        subscription.userName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subscription.userEmail,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.5),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ] else if (subscription.resolvedAt != null) ...[
                 const SizedBox(width: 12),
-                Expanded(
-                  child: _InfoChip(
-                    label: subscription.status == 'approved' ? 'Approved' : 'Resolved',
-                    value: _formatDate(subscription.resolvedAt!),
-                  ),
-                ),
+                StatusBadge.fromString(badgeStatus),
               ],
-            ],
-          ),
+            ),
+            const SizedBox(height: 12),
+            // Plan and dates row
+            Row(
+              children: [
+                Expanded(
+                  child: _InfoChip(
+                    label: 'Plan',
+                    value: subscription.plan.toUpperCase(),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _InfoChip(
+                    label: 'Requested',
+                    value: subscription.requestedAt != null
+                        ? _formatDate(subscription.requestedAt!)
+                        : 'N/A',
+                  ),
+                ),
+                if (subscription.expiryDate != null) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _InfoChip(
+                      label: isExpired ? 'Expired On' : 'Due Date',
+                      value: _formatDate(subscription.expiryDate!),
+                      highlight: isExpired || isDue,
+                      highlightColor: isExpired
+                          ? Colors.redAccent
+                          : (isDue ? const Color(0xFFFFB300) : null),
+                    ),
+                  ),
+                ] else if (subscription.resolvedAt != null) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _InfoChip(
+                      label: subscription.status == 'approved'
+                          ? 'Approved'
+                          : 'Resolved',
+                      value: _formatDate(subscription.resolvedAt!),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           // Action buttons for pending subscriptions
           if (subscription.status == 'pending' &&
               (onApprove != null || onReject != null))
@@ -171,20 +197,31 @@ class SubscriptionCard extends StatelessWidget {
 class _InfoChip extends StatelessWidget {
   final String label;
   final String value;
+  final bool highlight;
+  final Color? highlightColor;
 
   const _InfoChip({
     required this.label,
     required this.value,
+    this.highlight = false,
+    this.highlightColor,
   });
 
   @override
   Widget build(BuildContext context) {
+    final color = highlightColor ?? Colors.redAccent;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: highlight
+            ? color.withOpacity(0.12)
+            : Colors.white.withOpacity(0.05),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(
+          color: highlight
+              ? color.withOpacity(0.5)
+              : Colors.white.withOpacity(0.08),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -192,7 +229,9 @@ class _InfoChip extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: Colors.white.withOpacity(0.5),
+              color: highlight
+                  ? color.withOpacity(0.9)
+                  : Colors.white.withOpacity(0.5),
               fontSize: 11,
               fontWeight: FontWeight.w500,
             ),
@@ -200,8 +239,8 @@ class _InfoChip extends StatelessWidget {
           const SizedBox(height: 2),
           Text(
             value,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: highlight ? color : Colors.white,
               fontSize: 13,
               fontWeight: FontWeight.w600,
             ),

@@ -63,6 +63,11 @@ class AdminRepositoryImpl implements AdminRepository {
   }
 
   @override
+  Future<List<SubscriptionEntity>> getExpiredSubscriptions() async {
+    return await remoteDataSource.getExpiredSubscriptions(token: token);
+  }
+
+  @override
   Future<SubscriptionEntity> getSubscriptionDetail({
     required String subId,
   }) async {

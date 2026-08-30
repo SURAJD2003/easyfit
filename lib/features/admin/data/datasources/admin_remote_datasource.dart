@@ -187,6 +187,25 @@ class AdminRemoteDataSource {
     return [];
   }
 
+  Future<List<SubscriptionModel>> getExpiredSubscriptions({
+    required String token,
+  }) async {
+    final res = await client.get(
+      Uri.parse('$baseUrl${ApiConstants.adminExpiredSubscriptions}'),
+      headers: _headers(token),
+    );
+    _handleError(res);
+    final data = _unwrapBody(res);
+
+    if (data is List) {
+      return data
+          .map((e) => SubscriptionModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    }
+
+    return [];
+  }
+
   Future<SubscriptionModel> getSubscriptionDetail({
     required String token,
     required String subId,
