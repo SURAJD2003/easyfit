@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../domain/entities/subscription_entity.dart';
 import '../providers/admin_provider.dart';
 import 'admin_main_screen.dart';
 import '../widgets/subscription_card.dart';
@@ -164,7 +165,7 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen>
     );
   }
 
-  void _showHistoryBottomSheet(BuildContext context, dynamic sub) {
+  void _showHistoryBottomSheet(BuildContext context, SubscriptionEntity sub) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -184,7 +185,7 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Renewal History: ${sub.userName}',
+                'Plan Details: ${sub.userName}',
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 20,
@@ -192,8 +193,6 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen>
                 ),
               ),
               const SizedBox(height: 16),
-              // TODO: Fetch and display actual history from API.
-              // For now, displaying a placeholder or the current subscription.
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -209,19 +208,25 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen>
                       children: [
                         Text(
                           sub.plan.toUpperCase(),
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                              color: Colors.white, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           'Current Plan',
-                          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.5), fontSize: 12),
                         ),
                       ],
                     ),
                     Text(
                       sub.status.toUpperCase(),
                       style: TextStyle(
-                        color: sub.status == 'approved' ? Colors.green : Colors.orange,
+                        color: sub.status == 'approved' || sub.status == 'active'
+                            ? Colors.green
+                            : (sub.status == 'expired'
+                                ? Colors.redAccent
+                                : Colors.orange),
                         fontWeight: FontWeight.bold,
                         fontSize: 12,
                       ),
@@ -229,14 +234,70 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen>
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-              const Center(
-                child: Text(
-                  'Past renewal data not yet available from server.',
-                  style: TextStyle(color: Colors.white38, fontSize: 13),
+              const SizedBox(height: 20),
+              const Text(
+                'History Records',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 10),
+              if (sub.history.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Center(
+                    child: Text(
+                      'No previous history records available.',
+                      style: TextStyle(color: Colors.white38, fontSize: 13),
+                    ),
+                  ),
+                )
+              else
+                ...sub.history.map((h) => Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.03),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.white.withOpacity(0.06)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                h.planName.isNotEmpty ? h.planName : h.planId,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                              if (h.startDate != null)
+                                Text(
+                                  'Started: ${h.startDate!.day}/${h.startDate!.month}/${h.startDate!.year}',
+                                  style: const TextStyle(
+                                      color: Colors.white38, fontSize: 11),
+                                ),
+                            ],
+                          ),
+                          Text(
+                            h.status.toUpperCase(),
+                            style: TextStyle(
+                              color: h.status == 'active'
+                                  ? Colors.green
+                                  : Colors.white54,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )),
+              const SizedBox(height: 24),
             ],
           ),
         );

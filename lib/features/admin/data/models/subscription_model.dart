@@ -13,6 +13,7 @@ class SubscriptionModel extends SubscriptionEntity {
     super.expiryDate,
     super.note,
     super.reason,
+    super.history = const [],
   });
 
   factory SubscriptionModel.fromJson(Map<String, dynamic> json) {
@@ -34,6 +35,16 @@ class SubscriptionModel extends SubscriptionEntity {
         json['updatedAt'] ??
         json['updated_at'] ??
         json['approvedAt'];
+
+    final rawHistory = json['history'];
+    final List<SubscriptionHistoryItem> historyList = [];
+    if (rawHistory is List) {
+      for (final h in rawHistory) {
+        if (h is Map<String, dynamic>) {
+          historyList.add(SubscriptionHistoryItem.fromJson(h));
+        }
+      }
+    }
 
     return SubscriptionModel(
       id: json['id']?.toString() ??
@@ -69,6 +80,7 @@ class SubscriptionModel extends SubscriptionEntity {
           rawExpiry != null ? DateTime.tryParse(rawExpiry.toString()) : null,
       note: json['note']?.toString(),
       reason: json['reason']?.toString(),
+      history: historyList,
     );
   }
 }

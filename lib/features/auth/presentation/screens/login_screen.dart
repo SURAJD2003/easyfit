@@ -3,8 +3,10 @@ import 'package:flutter/gestures.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../providers/auth_provider.dart';
+import '../../../../services/biometric_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -20,6 +22,37 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _obscurePassword = true;
   bool _isLoading = false;
+  bool _rememberMe = true;
+  bool _isBiometricAvailable = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedCredentials();
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final remember = prefs.getBool('user_remember_me') ?? true;
+    final savedEmail = prefs.getString('saved_user_email');
+    final savedPassword = prefs.getString('saved_user_password');
+    final biometricSupported = await BiometricService().isBiometricAvailable();
+
+    if (mounted) {
+      setState(() {
+        _isBiometricAvailable = biometricSupported;
+        _rememberMe = remember;
+        if (remember) {
+          if (savedEmail != null && savedEmail.isNotEmpty) {
+            _emailController.text = savedEmail;
+          }
+          if (savedPassword != null && savedPassword.isNotEmpty) {
+            _passwordController.text = savedPassword;
+          }
+        }
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -28,19 +61,51 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  Future<void> _loginWithBiometrics() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+
+    if (email.isEmpty || password.isEmpty) {
+      _showSnackBar('Please log in with email and password once to enable biometrics');
+      return;
+    }
+
+    final authenticated = await BiometricService().authenticate(
+      reason: 'Authenticate with Face ID / Fingerprint to log into EasyFit',
+    );
+
+    if (authenticated && mounted) {
+      _handleLogin();
+    }
+  }
+
   void _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
 
     final authProvider = context.read<AuthProvider>();
 
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+
     await authProvider.login(
-      email: _emailController.text.trim(),
-      password: _passwordController.text,
+      email: email,
+      password: password,
     );
 
     if (!mounted) return;
 
     if (authProvider.status == AuthStatus.success) {
+      final prefs = await SharedPreferences.getInstance();
+      if (_rememberMe) {
+        await prefs.setBool('user_remember_me', true);
+        await prefs.setString('saved_user_email', email);
+        await prefs.setString('saved_user_password', password);
+      } else {
+        await prefs.setBool('user_remember_me', false);
+        await prefs.remove('saved_user_email');
+        await prefs.remove('saved_user_password');
+      }
+
       _showSnackBar('Login successful!');
       await authProvider.fetchSubscriptionStatus();
       await Future.delayed(const Duration(milliseconds: 500));
@@ -107,6 +172,38 @@ class _LoginScreenState extends State<LoginScreen> {
 
                     // ── PRIMARY BUTTON ──
                     _buildSignInButton(),
+
+                    if (_isBiometricAvailable) ...[
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        onPressed: _loginWithBiometrics,
+                        icon: const Icon(
+                          Icons.fingerprint_rounded,
+                          color: Color(0xFFFF7A00),
+                          size: 22,
+                        ),
+                        label: Text(
+                          'Sign in with Face ID / Fingerprint',
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.white,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(50),
+                          side: BorderSide(
+                            color: const Color(0xFFFF7A00).withOpacity(0.4),
+                            width: 1.2,
+                          ),
+                          backgroundColor:
+                              const Color(0xFFFF7A00).withOpacity(0.08),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                    ],
 
                     const SizedBox(height: 32),
 
@@ -270,19 +367,56 @@ class _LoginScreenState extends State<LoginScreen> {
           },
         ),
         const SizedBox(height: 16),
-        Align(
-          alignment: Alignment.centerRight,
-          child: GestureDetector(
-            onTap: () => context.go(RouteNames.forgotPass),
-            child: Text(
-              'Forgot password?',
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: const Color(0xFFFF7A00),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: Checkbox(
+                    value: _rememberMe,
+                    onChanged: (val) =>
+                        setState(() => _rememberMe = val ?? false),
+                    activeColor: const Color(0xFFFF7A00),
+                    checkColor: Colors.white,
+                    side: BorderSide(
+                      color: Colors.white.withOpacity(0.35),
+                      width: 1.5,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () => setState(() => _rememberMe = !_rememberMe),
+                  child: Text(
+                    'Remember me',
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w400,
+                      color: Colors.white70,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            GestureDetector(
+              onTap: () => context.go(RouteNames.forgotPass),
+              child: Text(
+                'Forgot password?',
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: const Color(0xFFFF7A00),
+                ),
               ),
             ),
-          ),
+          ],
         ),
       ],
     );

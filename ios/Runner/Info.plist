@@ -47,6 +47,8 @@
 	<true/>
 	<key>NSMotionUsageDescription</key>
 	<string>This app requires access to your pedometer and motion sensors to track your daily steps accurately.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Use Face ID to securely log in to your EasyFit admin account.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

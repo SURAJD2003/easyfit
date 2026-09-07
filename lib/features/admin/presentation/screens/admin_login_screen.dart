@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/router/route_names.dart';
+import '../../../../services/biometric_service.dart';
 import '../providers/admin_provider.dart';
 
 class AdminLoginScreen extends StatefulWidget {
@@ -17,16 +19,74 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
+  bool _rememberMe = true;
+  bool _isBiometricAvailable = false;
 
   static const Color _accent = Color(0xFFE8721A);
   static const Color _bg = Color(0xFF0D0600);
   static const Color _cardColor = Color(0xFF1C0A00);
 
   @override
+  void initState() {
+    super.initState();
+    _loadSavedCredentials();
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final remember = prefs.getBool('admin_remember_me') ?? true;
+    final savedEmail = prefs.getString('saved_admin_email');
+    final savedPassword = prefs.getString('saved_admin_password');
+    final biometricSupported = await BiometricService().isBiometricAvailable();
+
+    if (mounted) {
+      setState(() {
+        _isBiometricAvailable = biometricSupported;
+        _rememberMe = remember;
+        if (remember) {
+          if (savedEmail != null && savedEmail.isNotEmpty) {
+            _emailController.text = savedEmail;
+          }
+          if (savedPassword != null && savedPassword.isNotEmpty) {
+            _passwordController.text = savedPassword;
+          }
+        }
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loginWithBiometrics() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Please log in with credentials once to enable biometric quick access',
+            style: GoogleFonts.inter(),
+          ),
+          backgroundColor: const Color(0xFF2A2A2A),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final authenticated = await BiometricService().authenticate(
+      reason: 'Authenticate with Face ID / Fingerprint to log into Admin Portal',
+    );
+
+    if (authenticated && mounted) {
+      await _login();
+    }
   }
 
   Future<void> _login() async {
@@ -52,6 +112,17 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         );
 
     if (success && mounted) {
+      final prefs = await SharedPreferences.getInstance();
+      if (_rememberMe) {
+        await prefs.setBool('admin_remember_me', true);
+        await prefs.setString('saved_admin_email', email);
+        await prefs.setString('saved_admin_password', password);
+      } else {
+        await prefs.setBool('admin_remember_me', false);
+        await prefs.remove('saved_admin_email');
+        await prefs.remove('saved_admin_password');
+      }
+
       context.go(RouteNames.adminDashboard);
     }
   }
@@ -213,7 +284,43 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                                       setState(() => _obscurePassword = !_obscurePassword),
                                 ),
                               ),
-                              const SizedBox(height: 32),
+                              const SizedBox(height: 16),
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    height: 22,
+                                    width: 22,
+                                    child: Checkbox(
+                                      value: _rememberMe,
+                                      onChanged: (val) =>
+                                          setState(() => _rememberMe = val ?? false),
+                                      activeColor: _accent,
+                                      checkColor: Colors.white,
+                                      side: BorderSide(
+                                        color: Colors.white.withOpacity(0.35),
+                                        width: 1.5,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  GestureDetector(
+                                    onTap: () =>
+                                        setState(() => _rememberMe = !_rememberMe),
+                                    child: Text(
+                                      'Remember Me',
+                                      style: GoogleFonts.inter(
+                                        color: Colors.white70,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 24),
 
                               Consumer<AdminProvider>(
                                 builder: (context, provider, _) {
@@ -313,6 +420,64 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                                   );
                                 },
                               ),
+                              if (_isBiometricAvailable) ...[
+                                const SizedBox(height: 20),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Divider(
+                                        color: Colors.white.withOpacity(0.1),
+                                        thickness: 1,
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                                      child: Text(
+                                        'OR',
+                                        style: GoogleFonts.inter(
+                                          color: Colors.white30,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Divider(
+                                        color: Colors.white.withOpacity(0.1),
+                                        thickness: 1,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 20),
+                                OutlinedButton.icon(
+                                  onPressed: _loginWithBiometrics,
+                                  icon: const Icon(
+                                    Icons.fingerprint_rounded,
+                                    color: _accent,
+                                    size: 24,
+                                  ),
+                                  label: Text(
+                                    'Log in with Face ID / Fingerprint',
+                                    style: GoogleFonts.inter(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    minimumSize: const Size.fromHeight(52),
+                                    side: BorderSide(
+                                      color: _accent.withOpacity(0.4),
+                                      width: 1.2,
+                                    ),
+                                    backgroundColor: _accent.withOpacity(0.08),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),

@@ -615,6 +615,9 @@ class AdminProvider extends ChangeNotifier {
             expiryDate: expDate,
             note: e.note ?? existing?.note,
             reason: e.reason ?? existing?.reason,
+            history: e.history.isNotEmpty
+                ? e.history
+                : (existing?.history ?? const []),
           );
         }
       } catch (e) {
@@ -644,10 +647,13 @@ class AdminProvider extends ChangeNotifier {
             expiryDate: e.expiryDate ?? existing?.expiryDate,
             note: e.note ?? existing?.note,
             reason: e.reason ?? existing?.reason,
+            history: e.history.isNotEmpty
+                ? e.history
+                : (existing?.history ?? const []),
           );
         }
-      } catch (_) {
-        // Endpoint /admin/expiredSubscriptions not available on backend; expired items are automatically filtered from the main list.
+      } catch (e) {
+        debugPrint('Failed to fetch expired subscriptions: $e');
       }
 
       _subscriptionsState = _subscriptionsState.copyWith(

@@ -9,6 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import '../core/api_client.dart';
+import '../core/router/app_router.dart';
+import '../core/router/route_names.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -206,7 +208,10 @@ class PushNotificationService {
       await _firebaseMessaging.subscribeToTopic('admin_notifications');
       await _firebaseMessaging.subscribeToTopic('new_signup');
       await _firebaseMessaging.subscribeToTopic('new_users');
-      debugPrint('✅ Subscribed to admin FCM topics: admin, admin_notifications, new_signup, new_users');
+      await _firebaseMessaging.subscribeToTopic('new_subscription');
+      await _firebaseMessaging.subscribeToTopic('new_subscriber');
+      await _firebaseMessaging.subscribeToTopic('admin_subscriptions');
+      debugPrint('✅ Subscribed to admin FCM topics: admin, admin_notifications, new_signup, new_users, new_subscription, admin_subscriptions');
     } catch (e) {
       debugPrint('❌ Failed to subscribe to admin topics: $e');
     }
@@ -219,6 +224,9 @@ class PushNotificationService {
       await _firebaseMessaging.unsubscribeFromTopic('admin_notifications');
       await _firebaseMessaging.unsubscribeFromTopic('new_signup');
       await _firebaseMessaging.unsubscribeFromTopic('new_users');
+      await _firebaseMessaging.unsubscribeFromTopic('new_subscription');
+      await _firebaseMessaging.unsubscribeFromTopic('new_subscriber');
+      await _firebaseMessaging.unsubscribeFromTopic('admin_subscriptions');
       debugPrint('✅ Unsubscribed from admin FCM topics');
     } catch (e) {
       debugPrint('❌ Failed to unsubscribe from admin topics: $e');
@@ -303,8 +311,39 @@ class PushNotificationService {
     }
   }
 
-  void _handleNotificationClick(Map<String, dynamic> data) {
-    debugPrint('Notification clicked with data: $data');
-    // Implement navigation logic here based on data payload
+  void _handleNotificationClick(Map<String, dynamic> data) async {
+    debugPrint('🔔 Notification clicked with data: $data');
+    try {
+      final type = (data['type'] ?? data['Type'] ?? '').toString().toLowerCase();
+      final prefs = await SharedPreferences.getInstance();
+      final isAdmin = prefs.getString('admin_token') != null;
+
+      if (type == 'new_subscription' || type == 'subscription_request') {
+        if (isAdmin) {
+          appRouter.go(RouteNames.adminSubscriptions);
+          return;
+        }
+      }
+
+      if (type == 'new_user_signup' || type == 'new_user') {
+        if (isAdmin) {
+          appRouter.go(RouteNames.adminUsers);
+          return;
+        }
+      }
+
+      if (type.contains('approved') || type == 'subscription_approved') {
+        appRouter.go(RouteNames.dashboard);
+        return;
+      }
+
+      if (isAdmin) {
+        appRouter.go(RouteNames.adminDashboard);
+      } else {
+        appRouter.go(RouteNames.dashboard);
+      }
+    } catch (e) {
+      debugPrint('Error navigating on notification click: $e');
+    }
   }
 }
