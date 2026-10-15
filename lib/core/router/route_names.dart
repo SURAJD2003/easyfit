@@ -15,6 +15,7 @@ abstract class RouteNames {
   static const notifications = '/notifications';
   static const subscription = '/subscription';
   static const approvalPending = '/approval-pending';
+  static const updateRequired = '/update-required';
 
   // ─── ADMIN ROUTES ─────────────────────────────────────
   static const admin = '/admin';

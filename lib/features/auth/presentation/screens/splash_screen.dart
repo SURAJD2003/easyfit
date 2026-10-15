@@ -8,6 +8,7 @@ import '../../../../core/router/route_names.dart';
 import 'package:provider/provider.dart';
 import '../../../../providers/auth_provider.dart';
 import '../../../admin/presentation/providers/admin_provider.dart';
+import '../../../../core/services/update_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});

@@ -11,6 +11,7 @@ abstract class TrackingRepository {
     required int finalSteps,
     required int finalCalories,
     required double finalDistance,
+    String? endTimeOverride,
   });
   Future<Map<String, dynamic>> getSessionById(String id);
   Future<void> syncHourlyBuckets(String sessionId, {bool force = false});

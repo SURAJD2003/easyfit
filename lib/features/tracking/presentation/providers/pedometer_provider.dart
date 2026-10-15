@@ -118,29 +118,9 @@ class PedometerNotifier extends StateNotifier<AsyncValue<int>>
         }
       }
       
-      // Reset for new day
-      _accumulatedSteps = 0;
-      _baseSteps = -1;
-      _lastSyncedSteps = 0;
-      _lastMilestone = 0;
-      _lastHour = -1;
-      _stepsAtHourStart = 0;
-      _lastHourlyTotal = -1;
-      _lastHourlyEventTime = null;
-      _sessionDate = today;
-      state = const AsyncValue.data(0);
-      
-      // Persist the reset
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('session_accumulated_steps', 0);
-      await prefs.setString('session_date', today);
-      final sessionId = prefs.getString('active_session_id') ?? '';
-      if (sessionId.isNotEmpty) {
-        await prefs.remove('hourly_raw_steps_$sessionId');
-        await prefs.remove('hourly_event_time_$sessionId');
-      }
-      
-      debugPrint('✅ Steps reset to 0 for new day: $today');
+      debugPrint('Midnight detected in pedometer provider; preserving old session for rollover owner.');
+      return;
+
     }
   }
 

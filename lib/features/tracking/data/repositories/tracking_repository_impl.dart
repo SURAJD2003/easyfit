@@ -42,12 +42,14 @@ class TrackingRepositoryImpl implements TrackingRepository {
     required int finalSteps,
     required int finalCalories,
     required double finalDistance,
+    String? endTimeOverride,
   }) {
     return remoteDatasource.stopSession(
       sessionId: sessionId,
       finalSteps: finalSteps,
       finalCalories: finalCalories,
       finalDistance: finalDistance,
+      endTimeOverride: endTimeOverride,
     );
   }
 

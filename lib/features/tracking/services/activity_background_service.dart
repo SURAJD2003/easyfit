@@ -44,10 +44,7 @@ void onStart(ServiceInstance service) async {
   // If the service is waking up on a NEW day, do NOT pull yesterday's dead-app steps into today!
   if (sessionDate != todayOnStart) {
     debugPrint('⚠️ BG Woke up on a new day ($todayOnStart). Clearing old pedometer accumulation from $sessionDate.');
-    accumulatedBefore = 0;
-    sessionDate = todayOnStart;
-    prefsInit.setInt('session_accumulated_steps', 0);
-    prefsInit.setString('session_date', todayOnStart);
+    accumulatedBefore = prefsInit.getInt('session_accumulated_steps') ?? 0;
   } else {
     accumulatedBefore = prefsInit.getInt('session_accumulated_steps') ?? 0;
   }
@@ -221,10 +218,20 @@ void onStart(ServiceInstance service) async {
           // FLUSH hourly buckets for the old session before stopping it!
           await _flushHourlyBucketsNow(prefs, currentSessionId, token);
           
+          // The session belongs to sessionDate. We must ensure the backend attributes
+          // these steps to the old day. If we use DateTime.now(), it will attribute them to today!
+          final oldDayParts = sessionDate.split('-');
+          final oldDayEndTime = DateTime(
+            int.parse(oldDayParts[0]), 
+            int.parse(oldDayParts[1]), 
+            int.parse(oldDayParts[2]), 
+            23, 59, 59
+          );
+          
           // STOP the session → commits steps to stats/reports
           await dio.patch('/activity/session/stop', data: {
             'sessionId': currentSessionId,
-            'endTime': DateTime.now().subtract(const Duration(seconds: 1)).toIso8601String(),
+            'endTime': oldDayEndTime.toIso8601String(),
             'finalSteps': safeFinalSteps,
             'finalCalories': (safeFinalSteps * 0.045).round(),
             'finalDistance': double.parse((safeFinalSteps * 0.000762).toStringAsFixed(3)),
@@ -272,6 +279,14 @@ void onStart(ServiceInstance service) async {
       await prefs.setInt('session_accumulated_steps', 0);
       await prefs.setString('session_date', today);
       await prefs.setInt('synced_steps_offset', 0);
+      
+      // FIX: Clear completed steps so yesterday's total doesn't carry over!
+      await prefs.remove('completed_steps_today');
+      await prefs.remove('completed_steps_date');
+      // Also clear stale API cache so notification doesn't show yesterday's backend number
+      await prefs.remove('last_known_today_api_steps');
+      await prefs.remove('last_known_today_api_date');
+      
       // DO NOT clear hourly step data here! If we blindly delete them, any unsynced steps are permanently lost!
       // Old session data will sit safely in SharedPreferences (and we already flushed it above).
       
@@ -402,6 +417,7 @@ void onStart(ServiceInstance service) async {
     cancelOnError: false,
     );
   }
+  await _checkMidnightReset();
   startPedometer();
 
   // Initial notification
@@ -432,6 +448,10 @@ void onStart(ServiceInstance service) async {
       debugPrint('🔒 BG LOCK: Acquired cross-isolate lock (is_bg_syncing=true)');
       
       // Check midnight reset first
+      final didRollover = await _checkMidnightReset();
+      if (didRollover) {
+        await prefs.reload();
+      }
       final token = prefs.getString('auth_token');
       final currentSessionId = prefs.getString('active_session_id');
       
@@ -518,6 +538,9 @@ void onStart(ServiceInstance service) async {
       ));
       
       // ── Build hourlyData array with DELTAS ──
+      // FIX: The Main Isolate may have injected catch-up steps into SharedPreferences.
+      // We MUST reload the background isolate's memory cache to see them before syncing!
+      await prefs.reload();
       final now = DateTime.now();
       final List<Map<String, dynamic>> hourlyData = [];
 
@@ -559,9 +582,9 @@ void onStart(ServiceInstance service) async {
         for (final bucket in hourlyData) {
           final h = bucket['hour'] as int;
           final syncedKey = 'synced_hourly_steps_${activeSessionId}_$h';
-          final bucketKey = 'hourly_steps_${activeSessionId}_$h';
-          final currentTotal = prefs.getInt(bucketKey) ?? 0;
-          await prefs.setInt(syncedKey, currentTotal);
+          final stepsSent = bucket['steps'] as num;
+          final currentSynced = prefs.getInt(syncedKey) ?? 0;
+          await prefs.setInt(syncedKey, currentSynced + stepsSent.toInt());
         }
 
         lastSyncedTotal = bgSteps;

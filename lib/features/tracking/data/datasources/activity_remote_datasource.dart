@@ -112,8 +112,9 @@ class ActivityRemoteDatasource {
     required int finalSteps,
     required int finalCalories,
     required double finalDistance,
+    String? endTimeOverride,
   }) async {
-      final endTime = DateTime.now().toIso8601String();
+      final endTime = endTimeOverride ?? DateTime.now().toIso8601String();
       final stopData = {
         'sessionId': sessionId,
         'endTime': endTime,
@@ -121,6 +122,13 @@ class ActivityRemoteDatasource {
         'finalCalories': finalCalories,
         'finalDistance': finalDistance,
       };
+      
+      debugPrint('===================================================');
+      debugPrint('🛑 STOP SESSION PAYLOAD SENT TO BACKEND:');
+      debugPrint('Session ID: $sessionId');
+      debugPrint('End Time:   $endTime   <--- CRITICAL: CHECK THIS DATE');
+      debugPrint('Steps:      $finalSteps');
+      debugPrint('===================================================');
       
       try {
         final parsedTime = DateTime.parse(endTime);

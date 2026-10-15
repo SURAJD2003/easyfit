@@ -1364,6 +1364,8 @@ import '../../../../core/api_constants.dart';
 import '../widgets/milestone_celebration_overlay.dart';
 import '../widgets/report_share_utils.dart';
 import '../../../subscription/presentation/providers/subscription_provider.dart';
+import '../../../../core/services/update_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 
 // ───────────────────────────────────────────
@@ -1441,6 +1443,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   Timer? _midnightTimer; // fires at 00:00 to reset daily data
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   final GlobalKey _streakRepaintKey = GlobalKey();
+  bool _showUpdateBanner = false;
 
   @override
   void initState() {
@@ -1467,6 +1470,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     _loadCompletedSteps(); // restore persisted step count after navigation/restart
     // Phase level now comes from backend progressData API (no local persistence needed)
     _startConnectivityListener(); // listen for online→offline transitions
+    _checkForAppUpdate();
     
     // Attach milestone controller & listen for milestones
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1481,7 +1485,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           final apiSteps = (next.todayActivity?['steps'] ?? 0) as int;
           if (_lastCompletedSteps > apiSteps && apiSteps > 0) {
             final missing = _lastCompletedSteps - apiSteps;
-            _pendingCatchupSteps = missing;
             debugPrint('🔍 Detected $missing missing steps (local=$_lastCompletedSteps, api=$apiSteps). Pushing now...');
             _pushMissingStepsOnCurrentSession(missing);
           }
@@ -1510,6 +1513,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       _lastCompletedSteps = 0;
       await prefs.remove('completed_steps_today');
       await prefs.remove('completed_steps_date');
+      // FIX: Also clear stale API cache
+      await prefs.remove('last_known_today_api_steps');
+      await prefs.remove('last_known_today_api_date');
       // Clear stale hourly step data (stats Day tab)
       for (int h = 0; h < 24; h++) {
         await prefs.remove('hourly_steps_$h');
@@ -1580,10 +1586,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     // --- MISSING STEPS DETECTION moved to _onDashboardStateChanged (fires after API loads) ---
   }
 
-  /// Steps that were counted locally but never reached the backend.
-  /// The next silent sync (tab switch / navigate) will include these in finalSteps.
-  int _pendingCatchupSteps = 0;
-
   /// Push missing steps through the EXISTING active session's sync endpoint.
   /// This doesn't create a new session — just pushes data on the current one.
   Future<void> _pushMissingStepsOnCurrentSession(int missingSteps) async {
@@ -1594,10 +1596,40 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       
       final repo = ref.read(trackingRepositoryProvider);
       
-      // FIX: Use hourly replay instead of sending all steps with current
-      // timestamp, which would dump everything into the current hour.
-      await repo.syncHourlyBuckets(activeSessionId);
+      debugPrint('===================================================');
+      debugPrint('🚨 [DEBUG] INITIATING CATCH-UP SYNC FOR $missingSteps STEPS');
+      debugPrint('🚨 [DEBUG] Target Session: $activeSessionId');
+      
+      // FIX: Do NOT inject catch-up steps into local SharedPreferences! 
+      // If we inject them into the active session's bucket, they will be double-counted 
+      // when the session stops (because _lastCompletedSteps already includes them).
+      // Instead, we just directly send them to the backend to fix the API's total.
+      final now = DateTime.now();
+      
+      debugPrint('💉 Directly sending $missingSteps catch-up steps to backend API (bypassing local buckets)');
+      
+      final dio = ApiClient().dio;
+      final syncPayload = {
+        'sessionId': activeSessionId,
+        'hourlyData': [
+          {
+            'hour': now.hour,
+            'steps': missingSteps,
+            'calories': (missingSteps * 0.045).round(),
+            'distance': double.parse((missingSteps * 0.000762).toStringAsFixed(3)),
+          }
+        ]
+      };
+      
+      await dio.post('/activity/sync', data: syncPayload);
       debugPrint('✅ Catch-up sync pushed $missingSteps steps on session $activeSessionId (via hourly replay)');
+      
+      // Wait 2 seconds for backend to process and recalculate daily totals
+      debugPrint('🚨 [DEBUG] Waiting 2 seconds for backend database to aggregate totals...');
+      await Future.delayed(const Duration(seconds: 2));
+      
+      debugPrint('🚨 [DEBUG] Triggering Dashboard Refresh Now!');
+      debugPrint('===================================================');
       
       // Refresh dashboard to reflect updated backend total
       ref.read(dashboardProvider.notifier).refreshToday();
@@ -1676,38 +1708,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     _midnightTimer = Timer(duration, () async {
       debugPrint('🌙 MIDNIGHT! Resetting daily data...');
       
-      // 1. Reset pedometer steps to zero
-      ref.read(pedometerProvider.notifier).resetForNewDay();
-      
-      // 2. Reset habit cards (new day = unchecked)
+      await _refreshTrackingState();
       if (mounted) {
         setState(() {
           _habitTablet = false;
           _habitWater = false;
           _habitWalk = false;
         });
-        // Restart pulse animation for the new day
         if (!_habitPulseAc.isAnimating) {
           _habitPulseAc.repeat(reverse: true);
         }
       }
-      
-      // 3. Reset completed steps for the new day
-      _lastCompletedSteps = 0;
-      
-      // 4. Clear hourly step data and stale completed steps
-      final prefs = await SharedPreferences.getInstance();
-      for (int h = 0; h < 24; h++) {
-        await prefs.remove('hourly_steps_$h');
-      }
-      await prefs.remove('completed_steps_today');
-      await prefs.remove('completed_steps_date');
-      
-      // 5. Refresh dashboard API data (will fetch new "today")
-      ref.read(dashboardProvider.notifier).refresh();
-      
-      // 5. Schedule next midnight
-      _scheduleMidnightReset();
     });
   }
 
@@ -1834,12 +1845,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       _lastCompletedSteps = 0;
       await prefs.remove('completed_steps_today');
       await prefs.remove('completed_steps_date');
+      // FIX: Also clear stale API cache
+      await prefs.remove('last_known_today_api_steps');
+      await prefs.remove('last_known_today_api_date');
       for (int h = 0; h < 24; h++) {
         await prefs.remove('hourly_steps_$h');
       }
-      
-      // Reset pedometer
-      ref.read(pedometerProvider.notifier).resetForNewDay();
       
       // Stop old session + start new one
       final online = await _isOnline();
@@ -1850,6 +1861,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           final repo = ref.read(trackingRepositoryProvider);
           
           // Compute safe finalSteps from hourly buckets
+          await prefs.reload();
           int hourlyBucketTotal = 0;
           for (int h = 0; h < 24; h++) {
             hourlyBucketTotal += prefs.getInt('hourly_steps_${sessionId}_$h') ?? 0;
@@ -1865,12 +1877,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             await repo.syncHourlyBuckets(sessionId, force: true); 
           } catch (_) {}
           
+          // The session belongs to sessionDate. We must ensure the backend attributes
+          // these steps to the old day.
+          final oldDayParts = sessionDate.split('-');
+          final oldDayEndTime = DateTime(
+            int.parse(oldDayParts[0]), 
+            int.parse(oldDayParts[1]), 
+            int.parse(oldDayParts[2]), 
+            23, 59, 59
+          );
+          
           // Stop the old session
           await repo.stopSession(
             sessionId: sessionId,
             finalSteps: safeFinalSteps,
             finalCalories: (safeFinalSteps * 0.045).round(),
             finalDistance: double.parse((safeFinalSteps * 0.000762).toStringAsFixed(3)),
+            endTimeOverride: oldDayEndTime.toIso8601String(),
           );
         } catch (e) {
           debugPrint('⚠️ Resume: failed to stop old session: $e');
@@ -1947,6 +1970,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         _lastCompletedSteps = 0;
         await prefs.remove('completed_steps_today');
         await prefs.remove('completed_steps_date');
+        // FIX: Also clear stale API cache
+        await prefs.remove('last_known_today_api_steps');
+        await prefs.remove('last_known_today_api_date');
         for (int h = 0; h < 24; h++) {
           await prefs.remove('hourly_steps_$h');
         }
@@ -1960,6 +1986,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             final repo = ref.read(trackingRepositoryProvider);
             
             // Compute safe finalSteps from hourly buckets
+            await prefs.reload();
             int hourlyBucketTotal = 0;
             for (int h = 0; h < 24; h++) {
               hourlyBucketTotal += prefs.getInt('hourly_steps_${sessionId}_$h') ?? 0;
@@ -1972,12 +1999,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             // Sync hourly buckets first
             try { await repo.syncHourlyBuckets(sessionId, force: true); } catch (_) {}
             
+            // The session belongs to sessionDate. We must ensure the backend attributes
+            // these steps to the old day.
+            final oldDayParts = sessionDate.split('-');
+            final oldDayEndTime = DateTime(
+              int.parse(oldDayParts[0]), 
+              int.parse(oldDayParts[1]), 
+              int.parse(oldDayParts[2]), 
+              23, 59, 59
+            );
+            
             // Stop the old session
             await repo.stopSession(
               sessionId: sessionId,
               finalSteps: safeFinalSteps,
               finalCalories: (safeFinalSteps * 0.045).round(),
               finalDistance: double.parse((safeFinalSteps * 0.000762).toStringAsFixed(3)),
+              endTimeOverride: oldDayEndTime.toIso8601String(),
             );
             debugPrint('✅ Old day session stopped with $safeFinalSteps steps');
           } catch (e) {
@@ -2176,11 +2214,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           // Get the values
           final livePedometerSteps = ref.read(pedometerProvider).value ?? 0;
           final sessionSteps = ref.read(pedometerProvider.notifier).currentSessionSteps;
+          await prefs.reload();
           final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
           
           // finalSteps is what we send to the backend for THIS SESSION ONLY.
           // It must NOT include _lastCompletedSteps, otherwise the backend will sum the daily total repeatedly!
           // HOWEVER: if we detected missing steps that never reached the server, include them here.
+          // FIX: The Background Isolate writes to SharedPreferences independently. We MUST reload the cache before reading!
+          await prefs.reload();
+          
           // Also check hourly bucket totals — the BG service may have synced steps that
           // haven't been reflected in session_accumulated_steps yet (race condition on short sessions).
           int hourlyBucketTotal = 0;
@@ -2188,19 +2230,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             hourlyBucketTotal += prefs.getInt('hourly_steps_${sessionIdToStop}_$h') ?? 0;
           }
           final rawFinalSteps = [sessionSteps, bgAccumulatedSteps, hourlyBucketTotal].reduce(math.max);
-          final finalSteps = rawFinalSteps + _pendingCatchupSteps;
+          final finalSteps = rawFinalSteps;
           final finalCalories = (finalSteps * 0.045).round();
           final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
           
-          if (_pendingCatchupSteps > 0) {
-            debugPrint('🔄 Including $_pendingCatchupSteps catch-up steps in this sync');
-          }
-          debugPrint('📊 Silent sync: sessionSteps=$sessionSteps, liveDisplay=$livePedometerSteps, cached=$_lastCompletedSteps, catchup=$_pendingCatchupSteps, final=$finalSteps');
-          _pendingCatchupSteps = 0; // consumed
+          debugPrint('📊 Silent sync: sessionSteps=$sessionSteps, liveDisplay=$livePedometerSteps, cached=$_lastCompletedSteps, final=$finalSteps');
           
           // Replay hourly buckets before stopping
           try {
-            await repo.syncHourlyBuckets(sessionIdToStop);
+            // FIX: MUST force=true so the FG sends the buckets immediately. 
+            // Otherwise, it skips and leaves it to the BG service, which might crash or miss it!
+            await repo.syncHourlyBuckets(sessionIdToStop, force: true);
           } catch (e) {
             debugPrint('⚠️ Pre-stop hourly replay failed: $e');
           }
@@ -2218,13 +2258,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           }
           
           // Update _lastCompletedSteps: add only NEW session steps (not catch-up, which was already counted locally)
+          // FIX: Check if the day changed during the sync cycle — if so, reset!
+          final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+          final completedDate = prefs.getString('completed_steps_date') ?? '';
+          if (completedDate != today) {
+            debugPrint('🌙 Silent sync: day changed ($completedDate → $today), resetting completed steps');
+            _lastCompletedSteps = 0;
+          }
           _lastCompletedSteps = _lastCompletedSteps + rawFinalSteps;
           // Also consider API — it might be higher if another device synced
           final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
           if (apiSteps.toInt() > _lastCompletedSteps) {
             _lastCompletedSteps = apiSteps.toInt();
           }
-          final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
           await prefs.setInt('completed_steps_today', _lastCompletedSteps);
           await prefs.setString('completed_steps_date', today);
           
@@ -2317,10 +2363,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           // Get the values
           final livePedometerSteps = ref.read(pedometerProvider).value ?? 0;
           final sessionSteps = ref.read(pedometerProvider.notifier).currentSessionSteps;
+          await prefs.reload();
           final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
           // finalSteps is what we send to the backend for THIS SESSION ONLY.
           // It must NOT include _lastCompletedSteps!
           // HOWEVER: if we detected missing steps that never reached the server, include them here.
+          // FIX: Reload cache before reading hourly buckets
+          await prefs.reload();
+          
           // Also check hourly bucket totals — the BG service may have synced steps that
           // haven't been reflected in session_accumulated_steps yet (race condition on short sessions).
           int hourlyBucketTotal = 0;
@@ -2328,18 +2378,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             hourlyBucketTotal += prefs.getInt('hourly_steps_${sessionIdToStop}_$h') ?? 0;
           }
           final rawFinalSteps = [sessionSteps, bgAccumulatedSteps, hourlyBucketTotal].reduce(math.max);
-          final finalSteps = rawFinalSteps + _pendingCatchupSteps;
+          final finalSteps = rawFinalSteps;
           final finalCalories = (finalSteps * 0.045).round();
           final finalDistance = double.parse((finalSteps * 0.000762).toStringAsFixed(3));
           
-          if (_pendingCatchupSteps > 0) {
-            debugPrint('🔄 Including $_pendingCatchupSteps catch-up steps in tab sync');
-          }
-          _pendingCatchupSteps = 0; // consumed
           
           // Replay hourly buckets before stopping
           try {
-            await repo.syncHourlyBuckets(sessionIdToStop);
+            // FIX: MUST force=true so the FG sends the buckets immediately
+            await repo.syncHourlyBuckets(sessionIdToStop, force: true);
           } catch (e) {
             debugPrint('⚠️ Pre-stop tab hourly replay failed: $e');
           }
@@ -2357,12 +2404,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           }
           
           // Update _lastCompletedSteps: add only NEW session steps (not catch-up, which was already counted locally)
+          // FIX: Check if the day changed during the sync cycle — if so, reset!
+          final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+          final completedDate = prefs.getString('completed_steps_date') ?? '';
+          if (completedDate != today) {
+            debugPrint('🌙 Tab sync: day changed ($completedDate → $today), resetting completed steps');
+            _lastCompletedSteps = 0;
+          }
           _lastCompletedSteps = _lastCompletedSteps + rawFinalSteps;
           final apiSteps = (ref.read(dashboardProvider).todayActivity?['steps'] ?? 0) as num;
           if (apiSteps.toInt() > _lastCompletedSteps) {
             _lastCompletedSteps = apiSteps.toInt();
           }
-          final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
           await prefs.setInt('completed_steps_today', _lastCompletedSteps);
           await prefs.setString('completed_steps_date', today);
           
@@ -3701,6 +3754,81 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       ]),
     );
   }
+  // ── IN-APP UPDATE BANNER ───────────────────────────────
+  Future<void> _checkForAppUpdate() async {
+    try {
+      final updateService = UpdateService();
+      final needsUpdate = await updateService.checkForUpdate();
+      if (mounted && needsUpdate) {
+        setState(() => _showUpdateBanner = true);
+      }
+    } catch (_) {}
+  }
+
+  Widget _updateBanner() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 8, 22, 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF1C1208), Color(0xFF1A0E04)],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFE8721A).withOpacity(0.3), width: 1),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8721A).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.system_update_rounded, color: Color(0xFFE8721A), size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('New version available',
+                    style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
+                  const SizedBox(height: 2),
+                  Text('Update now for the best experience',
+                    style: GoogleFonts.inter(fontSize: 11, color: Colors.white38)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () {
+                final updateService = UpdateService();
+                updateService.performUpdate();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8721A),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text('Update',
+                  style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+              ),
+            ),
+            const SizedBox(width: 4),
+            GestureDetector(
+              onTap: () => setState(() => _showUpdateBanner = false),
+              child: const Icon(Icons.close, size: 18, color: Colors.white24),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   // 移除多余的 build 方法
   Widget _homeTab(DashboardState state, int sessionSteps) {
@@ -3715,6 +3843,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _header(),
+          if (_showUpdateBanner) _updateBanner(),
           _heroCard(state, sessionSteps),
           _sectionLabel('Morning Routine'),
           _morningHabitsSection(),
@@ -4295,9 +4424,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   Widget _weekChart(DashboardState state, int sessionSteps) {
     final weeklyData = state.weeklyStats ?? {};
     final daysList = (weeklyData['days'] as List<dynamic>?) ?? [];
-    final totalSteps = weeklyData['totalSteps'] ?? 0;
-    final totalCalories = weeklyData['totalCalories'] ?? 0;
-    final avgStepsPerDay = weeklyData['avgStepsPerDay'] ?? 0;
+    int totalSteps = (weeklyData['totalSteps'] as num?)?.toInt() ?? 0;
+    int totalCalories = (weeklyData['totalCalories'] as num?)?.toInt() ?? 0;
+    int avgStepsPerDay = (weeklyData['avgStepsPerDay'] as num?)?.toInt() ?? 0;
 
     // Build 7-day data from API response
     final List<String> dayLabels = [];
@@ -4329,7 +4458,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       final liveDailyTotal = _lastCompletedSteps + sessionSteps;
       final apiSteps = stepValues[todayIndex];
       final actualSteps = math.max(apiSteps, liveDailyTotal);
+      final diff = actualSteps - apiSteps;
       stepValues[todayIndex] = actualSteps;
+      if (diff > 0) {
+         totalSteps += diff;
+         avgStepsPerDay = (totalSteps / math.max(1, dayLabels.length)).round();
+      }
       if (calValues[todayIndex] == 0 && actualSteps > 0) {
         calValues[todayIndex] = (actualSteps * 0.045).toInt();
       }
@@ -4791,21 +4925,27 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             
             // Save for hero card display (so it doesn't drop to 0)
             // NEVER decrease — steps only go up within a day
-            _lastCompletedSteps = math.max(_lastCompletedSteps, totalSteps);
             SharedPreferences.getInstance().then((p) {
               final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+              final completedDate = p.getString('completed_steps_date') ?? '';
+              
+              // FIX: Check if the day changed during the sync cycle — if so, reset!
+              if (completedDate != today) {
+                debugPrint('🌙 Stop Button: day changed ($completedDate → $today), resetting completed steps');
+                _lastCompletedSteps = 0;
+              }
+              
+              _lastCompletedSteps = math.max(_lastCompletedSteps, totalSteps);
               p.setInt('completed_steps_today', _lastCompletedSteps);
               p.setString('completed_steps_date', today);
             });
             debugPrint('💾 Saved completed steps: $_lastCompletedSteps');
             
-            // NOW freeze the step counter (after capturing the value)
-            ref.read(pedometerProvider.notifier).stopSession();
-            
             final sessionIdToStop = prefs.getString('active_session_id') ?? '';
             
             if (sessionIdToStop.isNotEmpty) {
               // Send ONLY this session's steps to the backend
+              await prefs.reload();
               final bgAccumulatedSteps = prefs.getInt('session_accumulated_steps') ?? 0;
               // Also check hourly bucket totals for race condition on short sessions
               int hourlyBucketTotal = 0;
@@ -4819,7 +4959,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               debugPrint('📊 Stop: live=$livePedometerSteps, api=${prevApiSteps.toInt()}, bg=$bgAccumulatedSteps, final=$finalSteps, display=$_lastCompletedSteps');
               
               try {
-                await repo.syncHourlyBuckets(sessionIdToStop);
+                // FIX: Force sync to ensure buckets are sent before stopping session
+                await repo.syncHourlyBuckets(sessionIdToStop, force: true);
                 await repo.stopSession(
                   sessionId: sessionIdToStop,
                   finalSteps: finalSteps,
@@ -4838,6 +4979,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 }
               }
             }
+
+            // NOW freeze the step counter (after capturing and syncing the value)
+            ref.read(pedometerProvider.notifier).stopSession();
             
             // Clear sessionId
             await prefs.remove('active_session_id');
