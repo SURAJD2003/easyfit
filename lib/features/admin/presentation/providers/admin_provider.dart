@@ -128,8 +128,19 @@ class SubscriptionsState {
 
   List<SubscriptionEntity> getSubscriptionsForTab(String tabStatus) {
     var filtered = subscriptions;
+
     if (tabStatus != 'all') {
-      filtered = filtered.where((s) => s.status.toLowerCase() == tabStatus.toLowerCase()).toList();
+      final target = tabStatus.toLowerCase();
+      if (target == 'expired') {
+        filtered = filtered.where((s) => s.isExpired).toList();
+      } else if (target == 'due') {
+        filtered = filtered.where((s) => s.isDue).toList();
+      } else {
+        filtered = filtered.where((s) {
+          if (s.isExpired) return false;
+          return s.status.toLowerCase() == target;
+        }).toList();
+      }
     }
     if (searchQuery.isNotEmpty) {
       final query = searchQuery.toLowerCase();
@@ -325,21 +336,24 @@ class AdminProvider extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('active_session_id'); // Clear any tracking session
 
-        final service = FlutterBackgroundService();
-        if (await service.isRunning()) {
-          service.invoke('stopService');
-          // Try again after a delay to handle race conditions
-          Future.delayed(const Duration(seconds: 2), () async {
-            if (await service.isRunning()) {
-              service.invoke('stopService');
-            }
-          });
+        if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+          final service = FlutterBackgroundService();
+          if (await service.isRunning()) {
+            service.invoke('stopService');
+            // Try again after a delay to handle race conditions
+            Future.delayed(const Duration(seconds: 2), () async {
+              if (await service.isRunning()) {
+                service.invoke('stopService');
+              }
+            });
+          }
         }
       } catch (e) {
         debugPrint('Failed to stop background service: $e');
       }
       
-      PushNotificationService().registerTokenWithBackend();
+      PushNotificationService().subscribeToAdminTopics();
+      PushNotificationService().registerTokenWithBackend(isAdmin: true);
       notifyListeners();
       return true;
     } catch (e) {
@@ -370,26 +384,30 @@ class AdminProvider extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('active_session_id'); // Clear any tracking session
 
-        final service = FlutterBackgroundService();
-        if (await service.isRunning()) {
-          service.invoke('stopService');
-          // Try again after a delay to handle race conditions
-          Future.delayed(const Duration(seconds: 2), () async {
-            if (await service.isRunning()) {
-              service.invoke('stopService');
-            }
-          });
+        if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+          final service = FlutterBackgroundService();
+          if (await service.isRunning()) {
+            service.invoke('stopService');
+            // Try again after a delay to handle race conditions
+            Future.delayed(const Duration(seconds: 2), () async {
+              if (await service.isRunning()) {
+                service.invoke('stopService');
+              }
+            });
+          }
         }
       } catch (e) {
         debugPrint('Failed to stop background service: $e');
       }
       
-      PushNotificationService().registerTokenWithBackend();
+      PushNotificationService().subscribeToAdminTopics();
+      PushNotificationService().registerTokenWithBackend(isAdmin: true);
       notifyListeners();
     }
   }
 
   Future<void> logout() async {
+    PushNotificationService().unsubscribeFromAdminTopics();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('admin_token');
     await prefs.remove('admin_id');
@@ -539,37 +557,135 @@ class AdminProvider extends ChangeNotifier {
     try {
       final repo = _buildRepo();
       final regular = await repo.getSubscriptions();
-      
-      List<SubscriptionEntity> combined = List.from(regular);
-      
+
+      final Map<String, SubscriptionEntity> subMap = {};
+      int autoIdCounter = 0;
+
+      String? findKey(String id, String userId) {
+        if (id.isNotEmpty && subMap.containsKey(id)) return id;
+        if (userId.isNotEmpty) {
+          for (final entry in subMap.entries) {
+            if (entry.value.userId == userId || entry.key == userId) {
+              return entry.key;
+            }
+          }
+        }
+        if (id.isNotEmpty) {
+          for (final entry in subMap.entries) {
+            if (entry.value.id == id) return entry.key;
+          }
+        }
+        return null;
+      }
+
+      for (final s in regular) {
+        final key = s.id.isNotEmpty
+            ? s.id
+            : (s.userId.isNotEmpty ? s.userId : 'sub_${autoIdCounter++}');
+        subMap[key] = s;
+      }
+
       try {
         final due = await repo.getDueSubscriptions();
-        final List<SubscriptionEntity> mappedDue = due.map<SubscriptionEntity>((e) => SubscriptionModel(
-          id: e.id,
-          userId: e.userId,
-          userName: e.userName,
-          userEmail: e.userEmail,
-          plan: e.plan,
-          status: 'due',
-          requestedAt: e.requestedAt,
-          resolvedAt: e.resolvedAt,
-          expiryDate: e.expiryDate,
-          note: e.note,
-          reason: e.reason,
-        )).toList();
-        
-        combined.addAll(mappedDue);
+        final now = DateTime.now();
+
+        for (final e in due) {
+          final key = findKey(e.id, e.userId) ??
+              (e.id.isNotEmpty
+                  ? e.id
+                  : (e.userId.isNotEmpty ? e.userId : 'due_${autoIdCounter++}'));
+          final existing = subMap[key];
+          final expDate = e.expiryDate ?? existing?.expiryDate;
+          final isExp = e.isExpired ||
+              (existing != null && existing.isExpired) ||
+              (expDate != null && expDate.isBefore(now));
+
+          subMap[key] = SubscriptionModel(
+            id: e.id.isNotEmpty ? e.id : (existing?.id ?? key),
+            userId: e.userId.isNotEmpty ? e.userId : (existing?.userId ?? ''),
+            userName: e.userName != 'Unknown User'
+                ? e.userName
+                : (existing?.userName ?? e.userName),
+            userEmail: e.userEmail.isNotEmpty
+                ? e.userEmail
+                : (existing?.userEmail ?? ''),
+            plan: e.plan.isNotEmpty ? e.plan : (existing?.plan ?? 'free'),
+            status: isExp ? 'expired' : 'due',
+            requestedAt: e.requestedAt ?? existing?.requestedAt,
+            resolvedAt: e.resolvedAt ?? existing?.resolvedAt,
+            expiryDate: expDate,
+            note: e.note ?? existing?.note,
+            reason: e.reason ?? existing?.reason,
+            history: e.history.isNotEmpty
+                ? e.history
+                : (existing?.history ?? const []),
+          );
+        }
       } catch (e) {
         debugPrint('Failed to fetch due subscriptions: $e');
       }
 
+      try {
+        final expired = await repo.getExpiredSubscriptions();
+        for (final e in expired) {
+          final key = findKey(e.id, e.userId) ??
+              (e.id.isNotEmpty
+                  ? e.id
+                  : (e.userId.isNotEmpty ? e.userId : 'exp_${autoIdCounter++}'));
+          final existing = subMap[key];
+          subMap[key] = SubscriptionModel(
+            id: e.id.isNotEmpty ? e.id : (existing?.id ?? key),
+            userId: e.userId.isNotEmpty ? e.userId : (existing?.userId ?? ''),
+            userName: e.userName != 'Unknown User'
+                ? e.userName
+                : (existing?.userName ?? e.userName),
+            userEmail: e.userEmail.isNotEmpty
+                ? e.userEmail
+                : (existing?.userEmail ?? ''),
+            plan: e.plan.isNotEmpty ? e.plan : (existing?.plan ?? 'free'),
+            status: 'expired',
+            requestedAt: e.requestedAt ?? existing?.requestedAt,
+            resolvedAt: e.resolvedAt ?? existing?.resolvedAt,
+            expiryDate: e.expiryDate ?? existing?.expiryDate,
+            note: e.note ?? existing?.note,
+            reason: e.reason ?? existing?.reason,
+            history: e.history.isNotEmpty
+                ? e.history
+                : (existing?.history ?? const []),
+          );
+        }
+      } catch (e) {
+        debugPrint('Failed to fetch expired subscriptions: $e');
+      }
+
+      // Final pass: Any subscription with an expired date is strictly marked 'expired'
+      final List<SubscriptionEntity> finalSubs = subMap.values.map((s) {
+        if (s.isExpired && s.status.toLowerCase() != 'expired') {
+          return SubscriptionModel(
+            id: s.id,
+            userId: s.userId,
+            userName: s.userName,
+            userEmail: s.userEmail,
+            plan: s.plan,
+            status: 'expired',
+            requestedAt: s.requestedAt,
+            resolvedAt: s.resolvedAt,
+            expiryDate: s.expiryDate,
+            note: s.note,
+            reason: s.reason,
+            history: s.history,
+          );
+        }
+        return s;
+      }).toList();
+
       _subscriptionsState = _subscriptionsState.copyWith(
-        subscriptions: combined,
+        subscriptions: finalSubs,
         isLoading: false,
       );
     } catch (e) {
       _subscriptionsState = _subscriptionsState.copyWith(
-        error: _parseError(e),
+ ,       error: _parseError(e),
         isLoading: false,
       );
     }

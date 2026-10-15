@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import '../../../../core/router/route_names.dart';
 import '../providers/admin_provider.dart';
 import 'admin_main_screen.dart';
 import '../widgets/admin_stat_card.dart';
@@ -322,6 +324,11 @@ class _ErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isSessionExpired = message.toLowerCase().contains('session expired') ||
+        message.toLowerCase().contains('log in again') ||
+        message.toLowerCase().contains('unauthorized') ||
+        message.toLowerCase().contains('401');
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -333,21 +340,51 @@ class _ErrorView extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white54),
+              style: const TextStyle(color: Colors.white70, fontSize: 15),
             ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: onRetry,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6B00),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+            const SizedBox(height: 20),
+            if (isSessionExpired) ...[
+              ElevatedButton.icon(
+                onPressed: () async {
+                  await context.read<AdminProvider>().logout();
+                  if (context.mounted) {
+                    context.go(RouteNames.adminLogin);
+                  }
+                },
+                icon: const Icon(Icons.login_rounded, size: 18),
+                label: const Text('Log In Again'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF6B00),
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
-              child: const Text('Retry'),
-            ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: onRetry,
+                child: const Text(
+                  'Retry',
+                  style: TextStyle(color: Colors.white38),
+                ),
+              ),
+            ] else
+              ElevatedButton(
+                onPressed: onRetry,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF6B00),
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Retry'),
+              ),
           ],
         ),
       ),

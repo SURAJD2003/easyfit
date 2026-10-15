@@ -108,12 +108,14 @@ class SubscriptionRemoteDataSource {
     required String planName,
   }) async {
     try {
+      final payload = <String, dynamic>{
+        'planId': planId,
+        'plan': planName,
+      };
+
       final response = await _baseDio.post(
         ApiConstants.subRequest,
-        data: {
-          'planId': planId,
-          'plan': planName,
-        },
+        data: payload,
       );
       return response.data;
     } catch (e) {

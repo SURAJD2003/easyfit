@@ -9,6 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import '../core/api_client.dart';
+import '../core/router/app_router.dart';
+import '../core/router/route_names.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -134,6 +136,20 @@ class PushNotificationService {
       FlutterLocalNotificationsPlugin();
 
   bool _isInitialized = false;
+  bool _isRegisteringToken = false;
+  String? _lastRegisteredFcmToken;
+  String? _lastRegisteredAuthToken;
+  String? _lastRegisteredRole;
+
+  Future<void> clearTokenCache() async {
+    _lastRegisteredFcmToken = null;
+    _lastRegisteredAuthToken = null;
+    _lastRegisteredRole = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('last_registered_fcm_token');
+    await prefs.remove('last_registered_auth_token');
+    await prefs.remove('last_registered_role');
+  }
 
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -181,18 +197,16 @@ class PushNotificationService {
 
       // 3. Configure FCM foreground message handler
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        debugPrint('Got a message whilst in the foreground!');
-        
+        debugPrint('Got a message whilst in the foreground: ${message.data}');
+
         final type = message.data['type'] ?? message.data['Type'] ?? '';
         if (type == 'sync_request' || type == 'sync_steps') {
           debugPrint('🔄 FCM FOREGROUND: Triggering silent pedometer sync...');
           _performSilentSync();
+          return;
         }
 
-        if (message.notification != null) {
-          debugPrint('Message also contained a notification: ${message.notification}');
-          _showLocalNotification(message, channel);
-        }
+        _showLocalNotification(message, channel);
       });
 
       // 4. Handle initial message (if app was opened via a notification)
@@ -209,66 +223,158 @@ class PushNotificationService {
       // 6. Get the FCM Token
       final token = await _firebaseMessaging.getToken();
       debugPrint('FCM Token: $token');
-      
-      // We will register the token with the backend separately after login
+
+      // Check if admin is currently logged in and subscribe/unsubscribe accordingly
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString('admin_token') != null) {
+        await subscribeToAdminTopics();
+      } else {
+        await unsubscribeFromAdminTopics();
+      }
+
       _isInitialized = true;
     } catch (e) {
       debugPrint('Error initializing PushNotificationService: $e');
     }
   }
 
-  Future<void> registerTokenWithBackend() async {
+  Future<void> subscribeToAdminTopics() async {
+    if (kIsWeb) return;
+    try {
+      await _firebaseMessaging.subscribeToTopic('admin');
+      await _firebaseMessaging.subscribeToTopic('admin_notifications');
+      await _firebaseMessaging.subscribeToTopic('new_signup');
+      await _firebaseMessaging.subscribeToTopic('new_users');
+      await _firebaseMessaging.subscribeToTopic('new_subscription');
+      await _firebaseMessaging.subscribeToTopic('new_subscriber');
+      await _firebaseMessaging.subscribeToTopic('admin_subscriptions');
+      debugPrint('✅ Subscribed to admin FCM topics: admin, admin_notifications, new_signup, new_users, new_subscription, admin_subscriptions');
+    } catch (e) {
+      debugPrint('❌ Failed to subscribe to admin topics: $e');
+    }
+  }
+
+  Future<void> unsubscribeFromAdminTopics() async {
+    if (kIsWeb) return;
+    try {
+      await _firebaseMessaging.unsubscribeFromTopic('admin');
+      await _firebaseMessaging.unsubscribeFromTopic('admin_notifications');
+      await _firebaseMessaging.unsubscribeFromTopic('new_signup');
+      await _firebaseMessaging.unsubscribeFromTopic('new_users');
+      await _firebaseMessaging.unsubscribeFromTopic('new_subscription');
+      await _firebaseMessaging.unsubscribeFromTopic('new_subscriber');
+      await _firebaseMessaging.unsubscribeFromTopic('admin_subscriptions');
+      debugPrint('✅ Unsubscribed from admin FCM topics');
+    } catch (e) {
+      debugPrint('❌ Failed to unsubscribe from admin topics: $e');
+    }
+  }
+
+  Future<void> registerTokenWithBackend({bool isAdmin = false}) async {
+    if (kIsWeb) return;
+    if (_isRegisteringToken) {
+      debugPrint('FCM token registration already in progress, skipping.');
+      return;
+    }
+
+    _isRegisteringToken = true;
     try {
       final token = await _firebaseMessaging.getToken();
       if (token == null) return;
-      
+
       final dio = ApiClient().dio;
-      // Also try to get admin token if it exists
       final prefs = await SharedPreferences.getInstance();
       final authStr = prefs.getString('auth_token');
       final adminStr = prefs.getString('admin_token');
-      final activeToken = authStr ?? adminStr;
-      
+      final activeToken = isAdmin ? (adminStr ?? authStr) : (authStr ?? adminStr);
+      final role = (isAdmin || adminStr != null) ? 'admin' : 'user';
+
+      // Load cached registration values if memory is uninitialized
+      _lastRegisteredFcmToken ??= prefs.getString('last_registered_fcm_token');
+      _lastRegisteredAuthToken ??= prefs.getString('last_registered_auth_token');
+      _lastRegisteredRole ??= prefs.getString('last_registered_role');
+
+      // Deduplicate: If already registered with this exact token, auth token, and role, skip!
+      if (token == _lastRegisteredFcmToken &&
+          activeToken == _lastRegisteredAuthToken &&
+          role == _lastRegisteredRole) {
+        debugPrint('ℹ️ FCM token already registered with backend for this user/role. Skipping redundant call.');
+        return;
+      }
+
       if (activeToken != null) {
-        // Temporarily set the token in Dio for this request if ApiClient doesn't have it
         dio.options.headers['Authorization'] = 'Bearer $activeToken';
+      }
+
+      // If this device is acting as a regular user, ensure admin topics are unsubscribed
+      if (!isAdmin && adminStr == null) {
+        await unsubscribeFromAdminTopics();
       }
 
       await dio.post('/notifications/register', data: {
         'fcmToken': token,
         'platform': Platform.operatingSystem,
+        'role': role,
       });
-      debugPrint('Successfully registered FCM token with backend.');
+
+      // Update in-memory and persistent cache on success
+      _lastRegisteredFcmToken = token;
+      _lastRegisteredAuthToken = activeToken;
+      _lastRegisteredRole = role;
+      await prefs.setString('last_registered_fcm_token', token);
+      if (activeToken != null) {
+        await prefs.setString('last_registered_auth_token', activeToken);
+      } else {
+        await prefs.remove('last_registered_auth_token');
+      }
+      await prefs.setString('last_registered_role', role);
+
+      debugPrint('Successfully registered FCM token with backend (role: $role).');
     } catch (e) {
       debugPrint('Failed to register FCM token with backend: $e');
+    } finally {
+      _isRegisteringToken = false;
     }
   }
 
-  void _showLocalNotification(RemoteMessage message, AndroidNotificationChannel channel) {
-    final notification = message.notification;
-    final android = message.notification?.android;
+  void _showLocalNotification(
+      RemoteMessage message, AndroidNotificationChannel channel) {
+    if (kIsWeb) return;
 
-    if (notification != null && android != null && !kIsWeb) {
-      _localNotificationsPlugin.show(
-        notification.hashCode,
-        notification.title,
-        notification.body,
-        NotificationDetails(
-          android: AndroidNotificationDetails(
-            channel.id,
-            channel.name,
-            channelDescription: channel.description,
-            icon: android.smallIcon ?? '@mipmap/ic_launcher',
-          ),
-          iOS: const DarwinNotificationDetails(
-            presentAlert: true,
-            presentBadge: true,
-            presentSound: true,
-          ),
+    final title = message.notification?.title ??
+        message.data['title'] ??
+        message.data['Title'] ??
+        'EasyFit Notification';
+    final body = message.notification?.body ??
+        message.data['body'] ??
+        message.data['Body'] ??
+        message.data['message'] ??
+        '';
+
+    if (title.isEmpty && body.isEmpty) return;
+
+    _localNotificationsPlugin.show(
+      message.hashCode,
+      title,
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          channel.id,
+          channel.name,
+          channelDescription: channel.description,
+          icon: message.notification?.android?.smallIcon ??
+              '@mipmap/ic_launcher',
+          importance: Importance.max,
+          priority: Priority.high,
         ),
-        payload: jsonEncode(message.data),
-      );
-    }
+        iOS: const DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
+        ),
+      ),
+      payload: jsonEncode(message.data),
+    );
   }
 
   void _onNotificationTap(NotificationResponse response) {
@@ -282,8 +388,39 @@ class PushNotificationService {
     }
   }
 
-  void _handleNotificationClick(Map<String, dynamic> data) {
-    debugPrint('Notification clicked with data: $data');
-    // Implement navigation logic here based on data payload
+  void _handleNotificationClick(Map<String, dynamic> data) async {
+    debugPrint('🔔 Notification clicked with data: $data');
+    try {
+      final type = (data['type'] ?? data['Type'] ?? '').toString().toLowerCase();
+      final prefs = await SharedPreferences.getInstance();
+      final isAdmin = prefs.getString('admin_token') != null;
+
+      if (type == 'new_subscription' || type == 'subscription_request') {
+        if (isAdmin) {
+          appRouter.go(RouteNames.adminSubscriptions);
+          return;
+        }
+      }
+
+      if (type == 'new_user_signup' || type == 'new_user') {
+        if (isAdmin) {
+          appRouter.go(RouteNames.adminUsers);
+          return;
+        }
+      }
+
+      if (type.contains('approved') || type == 'subscription_approved') {
+        appRouter.go(RouteNames.dashboard);
+        return;
+      }
+
+      if (isAdmin) {
+        appRouter.go(RouteNames.adminDashboard);
+      } else {
+        appRouter.go(RouteNames.dashboard);
+      }
+    } catch (e) {
+      debugPrint('Error navigating on notification click: $e');
+    }
   }
 }

@@ -1,6 +1,6 @@
 import 'dart:convert';
-
 import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/api_client.dart';
 import '../../../../core/api_constants.dart';
@@ -12,27 +12,41 @@ class NotificationService {
 
   Future<ApiResult<List<AppNotification>>> getNotifications() async {
     try {
+      // Ensure token is attached if available in storage
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token') ?? prefs.getString('admin_token');
+      if (token != null && token.isNotEmpty) {
+        ApiClient().setToken(token);
+      }
+
       final response = await _dio.get(
         ApiConstants.notifications,
-        options: Options(headers: {'Accept': 'text/plain'}),
+        options: Options(headers: {
+          'Accept': 'application/json',
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        }),
       );
 
       final responseData = _decodeResponse(response.data);
-      if (responseData is! Map<String, dynamic>) {
-        return ApiResult.failure(
-          ApiError(
-            statusCode: response.statusCode,
-            message: 'Invalid announcements response',
-          ),
-        );
+
+      List<dynamic>? rawList;
+      if (responseData is List) {
+        rawList = responseData;
+      } else if (responseData is Map<String, dynamic>) {
+        rawList = responseData['notifications'] ??
+            responseData['Notifications'] ??
+            responseData['data'] ??
+            responseData['Data'] ??
+            responseData['items'] ??
+            responseData['Items'] ??
+            responseData['result'];
       }
 
-      final rawNotifications = responseData['notifications'];
-      final notifications = rawNotifications is List
-          ? rawNotifications
-                .whereType<Map<String, dynamic>>()
-                .map(AppNotification.fromJson)
-                .toList()
+      final notifications = rawList != null
+          ? rawList
+              .whereType<Map<String, dynamic>>()
+              .map(AppNotification.fromJson)
+              .toList()
           : <AppNotification>[];
 
       return ApiResult.success(notifications);
@@ -40,6 +54,17 @@ class NotificationService {
       return ApiResult.failure(_handleDioError(error));
     } catch (error) {
       return ApiResult.failure(ApiError(message: 'Unexpected error: $error'));
+    }
+  }
+
+  Future<ApiResult<void>> markAsRead(String id) async {
+    try {
+      await _dio.post('/notifications/$id/read');
+      return ApiResult.success(null);
+    } on DioException catch (error) {
+      return ApiResult.failure(_handleDioError(error));
+    } catch (error) {
+      return ApiResult.failure(ApiError(message: '$error'));
     }
   }
 
@@ -65,7 +90,17 @@ class NotificationService {
             data['detail']?.toString() ??
             data['title']?.toString() ??
             data['message']?.toString() ??
+            data['error']?.toString() ??
             'Failed to fetch announcements',
+      );
+    }
+
+    if (error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.receiveTimeout ||
+        error.type == DioExceptionType.connectionError) {
+      return ApiError(
+        statusCode: statusCode,
+        message: 'Network connection issue. Please check your internet.',
       );
     }
 

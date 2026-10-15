@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../services/push_notification_service.dart';
 import '../../data/datasources/subscription_remote_datasource.dart';
 import '../../data/models/subscription_plan_model.dart';
 import '../../data/models/user_subscription_status_model.dart';
@@ -139,12 +140,21 @@ class SubscriptionNotifier extends StateNotifier<SubscriptionState> {
     required String planId,
     required String planName,
   }) async {
+    if (state.isLoading) {
+      return false;
+    }
+    if (state.requestStatus?.isPending == true ||
+        state.requestStatus?.status.toLowerCase() == 'pending') {
+      return true;
+    }
+
     state = state.copyWith(isLoading: true, message: null);
     try {
       final res = await _dataSource.requestSubscription(
         planId: planId,
         planName: planName,
       );
+      await PushNotificationService().registerTokenWithBackend(isAdmin: false);
       state = state.copyWith(isLoading: false, message: res['message']);
       await fetchRequestStatus();
       return true;

@@ -6,7 +6,6 @@ class NotificationForm extends StatefulWidget {
   final Function({
     required String title,
     required String body,
-    String? imageUrl,
     String? segment,
   }) onSend;
 
@@ -24,7 +23,6 @@ class NotificationForm extends StatefulWidget {
 class _NotificationFormState extends State<NotificationForm> {
   final _titleController = TextEditingController();
   final _bodyController = TextEditingController();
-  final _imageController = TextEditingController();
   String _selectedSegment = 'free';
 
   static const Color _accent = Color(0xFFFF6B00);
@@ -34,8 +32,40 @@ class _NotificationFormState extends State<NotificationForm> {
   void dispose() {
     _titleController.dispose();
     _bodyController.dispose();
-    _imageController.dispose();
     super.dispose();
+  }
+
+  void _submit() {
+    FocusScope.of(context).unfocus();
+    final title = _titleController.text.trim();
+    final body = _bodyController.text.trim();
+
+    if (title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a notification title'),
+          backgroundColor: Color(0xFF2A2A2A),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    if (body.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a message'),
+          backgroundColor: Color(0xFF2A2A2A),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    widget.onSend(
+      title: title,
+      body: body,
+      segment: widget.isSegmented ? _selectedSegment : null,
+    );
   }
 
   @override
@@ -57,15 +87,6 @@ class _NotificationFormState extends State<NotificationForm> {
           icon: Icons.message_outlined,
           maxLines: 3,
         ),
-        if (!widget.isSegmented) ...[
-          const SizedBox(height: 14),
-          _buildInput(
-            controller: _imageController,
-            label: 'Image URL (Optional)',
-            hint: 'https://example.com/image.png',
-            icon: Icons.image_outlined,
-          ),
-        ],
         if (widget.isSegmented) ...[
           const SizedBox(height: 14),
           const Text(
@@ -101,7 +122,7 @@ class _NotificationFormState extends State<NotificationForm> {
                     child: Text(
                       seg[0].toUpperCase() + seg.substring(1),
                       style: TextStyle(
-                        color: isSelected ? Colors.white : Colors.white54,
+                        color: isSelected ? Colors.white : Colors.white60,
                         fontSize: 14,
                         fontWeight: isSelected
                             ? FontWeight.w600
@@ -118,17 +139,7 @@ class _NotificationFormState extends State<NotificationForm> {
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: widget.isSending
-                ? null
-                : () {
-                    widget.onSend(
-                      title: _titleController.text.trim(),
-                      body: _bodyController.text.trim(),
-                      imageUrl: _imageController.text.trim(),
-                      segment:
-                          widget.isSegmented ? _selectedSegment : null,
-                    );
-                  },
+            onPressed: widget.isSending ? null : _submit,
             style: ElevatedButton.styleFrom(
               backgroundColor: _accent,
               foregroundColor: Colors.white,

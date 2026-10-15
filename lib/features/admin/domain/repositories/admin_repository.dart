@@ -15,6 +15,7 @@ abstract class AdminRepository {
   // Subscriptions
   Future<List<SubscriptionEntity>> getSubscriptions();
   Future<List<SubscriptionEntity>> getDueSubscriptions();
+  Future<List<SubscriptionEntity>> getExpiredSubscriptions();
   Future<SubscriptionEntity> getSubscriptionDetail({required String subId});
   Future<void> approveSubscription({required String subId, String? note});
   Future<void> rejectSubscription({required String subId, String? reason});

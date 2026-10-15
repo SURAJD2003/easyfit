@@ -21,8 +21,12 @@ class ApiClient {
     ));
 
     dio.interceptors.add(InterceptorsWrapper(
-      onRequest: (options, handler) {
-        if (_token != null) {
+      onRequest: (options, handler) async {
+        if (_token == null || _token!.isEmpty) {
+          final prefs = await SharedPreferences.getInstance();
+          _token = prefs.getString('auth_token') ?? prefs.getString('admin_token');
+        }
+        if (_token != null && _token!.isNotEmpty) {
           options.headers['Authorization'] = 'Bearer $_token';
         }
         return handler.next(options);

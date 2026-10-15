@@ -54,6 +54,8 @@ class ApiConstants {
       '/admin/subscriptions'; // Corrected: removed /api
   static const String adminDueSubscriptions =
       '/admin/dueSubscriptions'; // New
+  static const String adminExpiredSubscriptions =
+      '/admin/expiredSubscriptions'; // New
 
   static String adminUserDetail(String userId) => '/api/admin/users/$userId';
   static String adminGrantSubscription(String userId) =>
