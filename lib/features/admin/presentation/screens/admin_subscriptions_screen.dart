@@ -367,23 +367,35 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen>
             ),
             const SizedBox(height: 16),
 
-            // Tab Bar
-            TabBar(
-              controller: _tabController,
-              isScrollable: true,
-              indicatorColor: _accent,
-              indicatorWeight: 3,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white54,
-              labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-              tabs: const [
-                Tab(text: 'All'),
-                Tab(text: 'Due'),
-                Tab(text: 'Expired'),
-                Tab(text: 'Pending'),
-                Tab(text: 'Approved'),
-                Tab(text: 'Rejected'),
-              ],
+            // Tab Bar with Live Counts
+            Consumer<AdminProvider>(
+              builder: (context, provider, _) {
+                final state = provider.subscriptionsState;
+                final allCount = state.getSubscriptionsForTab('all').length;
+                final dueCount = state.getSubscriptionsForTab('due').length;
+                final expiredCount = state.getSubscriptionsForTab('expired').length;
+                final pendingCount = state.getSubscriptionsForTab('pending').length;
+                final approvedCount = state.getSubscriptionsForTab('approved').length;
+                final rejectedCount = state.getSubscriptionsForTab('rejected').length;
+
+                return TabBar(
+                  controller: _tabController,
+                  isScrollable: true,
+                  indicatorColor: _accent,
+                  indicatorWeight: 3,
+                  labelColor: Colors.white,
+                  unselectedLabelColor: Colors.white54,
+                  labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                  tabs: [
+                    Tab(text: allCount > 0 ? 'All ($allCount)' : 'All'),
+                    Tab(text: dueCount > 0 ? 'Due ($dueCount)' : 'Due'),
+                    Tab(text: expiredCount > 0 ? 'Expired ($expiredCount)' : 'Expired'),
+                    Tab(text: pendingCount > 0 ? 'Pending ($pendingCount)' : 'Pending'),
+                    Tab(text: approvedCount > 0 ? 'Approved ($approvedCount)' : 'Approved'),
+                    Tab(text: rejectedCount > 0 ? 'Rejected ($rejectedCount)' : 'Rejected'),
+                  ],
+                );
+              },
             ),
             
             // Tab View (Slides)

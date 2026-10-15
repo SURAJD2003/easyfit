@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../../auth/presentation/screens/approval_pending_screen.dart';
+import 'package:provider/provider.dart' as provider_pkg;
+import 'package:go_router/go_router.dart';
+import '../../../../core/router/route_names.dart';
+import '../../../../core/router/app_router.dart';
+import '../../../../providers/auth_provider.dart';
 import '../providers/subscription_provider.dart';
 import '../../data/models/subscription_plan_model.dart';
 
@@ -27,6 +31,9 @@ class PaywallScreen extends ConsumerWidget {
                   const SizedBox(height: 20),
                   _buildHeader(),
                   const SizedBox(height: 32),
+                  if (subState.requestStatus?.isPending == true ||
+                      subState.requestStatus?.status.toLowerCase() == 'pending')
+                    _buildPendingNotice(context),
                   if (subState.isLoading)
                     const Center(
                       child: Padding(
@@ -196,6 +203,56 @@ class PaywallScreen extends ConsumerWidget {
       ),
     );
   }
+
+  Widget _buildPendingNotice(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFF6B2B).withOpacity(0.12),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFF6B2B).withOpacity(0.4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.hourglass_top_rounded, color: Color(0xFFFF6B2B), size: 24),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Request Pending Approval',
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Your subscription request is waiting for administrator approval.',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: () => context.go(RouteNames.approvalPending),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFFF6B2B),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+            ),
+            child: const Text('View Status'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _PlanCard extends ConsumerWidget {
@@ -207,7 +264,25 @@ class _PlanCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isYearly = plan.duration == 'yearly';
     final subState = ref.watch(subscriptionProvider);
+    final auth = provider_pkg.Provider.of<AuthProvider>(context, listen: false);
+
     final isCurrent = subState.status?.plan == plan.planId;
+    final isPending = subState.requestStatus?.isPending == true ||
+        subState.requestStatus?.status.toLowerCase() == 'pending' ||
+        auth.isPending;
+    final isSubmitting = subState.isLoading;
+    final isDisabled = isCurrent || isPending || isSubmitting;
+
+    String buttonText;
+    if (isSubmitting) {
+      buttonText = 'Submitting...';
+    } else if (isCurrent) {
+      buttonText = 'Current Plan';
+    } else if (isPending) {
+      buttonText = 'Pending Approval';
+    } else {
+      buttonText = 'Subscribe Now';
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -217,8 +292,10 @@ class _PlanCard extends ConsumerWidget {
         border: Border.all(
           color: isCurrent 
             ? const Color(0xFF30D158) 
-            : (isYearly ? const Color(0xFFFF6B2B) : const Color(0xFF252525)),
-          width: (isYearly || isCurrent) ? 2 : 1,
+            : (isPending 
+                ? const Color(0xFFFF6B2B).withOpacity(0.6)
+                : (isYearly ? const Color(0xFFFF6B2B) : const Color(0xFF252525))),
+          width: (isYearly || isCurrent || isPending) ? 2 : 1,
         ),
       ),
       padding: const EdgeInsets.all(24),
@@ -250,6 +327,23 @@ class _PlanCard extends ConsumerWidget {
                       fontSize: 10,
                       fontWeight: FontWeight.w900,
                       color: const Color(0xFF30D158),
+                    ),
+                  ),
+                )
+              else if (isPending)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6B2B).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFFF6B2B), width: 1),
+                  ),
+                  child: Text(
+                    'PENDING',
+                    style: GoogleFonts.inter(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      color: const Color(0xFFFF6B2B),
                     ),
                   ),
                 )
@@ -319,35 +413,34 @@ class _PlanCard extends ConsumerWidget {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: isCurrent ? null : () async {
-                // IMPORTANT: Capture navigator BEFORE the async call
-                // because Riverpod rebuilds this widget when state changes,
-                // which disposes the old context and makes context.mounted = false
-                final navigator = Navigator.of(context);
-                
-                // Submit subscription request (don't care if it fails,
-                // we still move to the pending screen)
-                try {
-                  await ref.read(subscriptionProvider.notifier).submitRequest(
-                    planId: plan.planId,
-                    planName: plan.duration,
-                  );
-                } catch (_) {
-                  // Even if API fails, still navigate to pending screen
-                }
-                
-                // Navigate using the captured navigator reference
-                navigator.pushAndRemoveUntil(
-                  MaterialPageRoute(
-                    builder: (_) => const ApprovalPendingScreen(),
-                  ),
-                  (route) => false,
-                );
-              },
+              onPressed: isDisabled
+                  ? (isPending ? () => context.go(RouteNames.approvalPending) : null)
+                  : () async {
+                      try {
+                        await ref.read(subscriptionProvider.notifier).submitRequest(
+                          planId: plan.planId,
+                          planName: plan.duration,
+                        );
+                        if (context.mounted) {
+                          await provider_pkg.Provider.of<AuthProvider>(context, listen: false)
+                              .fetchSubscriptionStatus();
+                        }
+                      } catch (_) {
+                        // Even if API fails, still navigate to pending screen
+                      }
+
+                      if (context.mounted) {
+                        context.go(RouteNames.approvalPending);
+                      } else {
+                        appRouter.go(RouteNames.approvalPending);
+                      }
+                    },
               style: ElevatedButton.styleFrom(
                 backgroundColor: isCurrent 
                   ? Colors.white.withOpacity(0.05) 
-                  : (isYearly ? const Color(0xFFFF6B2B) : Colors.white10),
+                  : (isPending
+                      ? const Color(0xFFFF6B2B).withOpacity(0.2)
+                      : (isYearly ? const Color(0xFFFF6B2B) : Colors.white10)),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
@@ -355,13 +448,22 @@ class _PlanCard extends ConsumerWidget {
                 ),
                 elevation: 0,
               ),
-              child: Text(
-                isCurrent ? 'Current Plan' : 'Subscribe Now',
-                style: GoogleFonts.inter(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16,
-                ),
-              ),
+              child: isSubmitting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : Text(
+                      buttonText,
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
             ),
           ),
         ],

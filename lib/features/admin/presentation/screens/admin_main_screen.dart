@@ -76,16 +76,6 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
                 ],
               ),
             ),
-            ListTile(
-              leading: const Icon(Icons.person_outline, color: Colors.white70),
-              title: const Text('My Profile', style: TextStyle(color: Colors.white70)),
-              onTap: () => Navigator.pop(context),
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings_outlined, color: Colors.white70),
-              title: const Text('Settings', style: TextStyle(color: Colors.white70)),
-              onTap: () => Navigator.pop(context),
-            ),
             const Spacer(),
             const Divider(color: Colors.white10),
             ListTile(

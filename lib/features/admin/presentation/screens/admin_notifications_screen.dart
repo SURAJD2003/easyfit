@@ -156,13 +156,11 @@ class _AdminNotificationsScreenState
                               onSend: ({
                                 required title,
                                 required body,
-                                imageUrl,
                                 segment,
                               }) async {
                                 await provider.broadcastNotification(
                                   title: title,
                                   body: body,
-                                  imageUrl: imageUrl,
                                 );
                               },
                             ),
@@ -220,7 +218,6 @@ class _AdminNotificationsScreenState
                               onSend: ({
                                 required title,
                                 required body,
-                                imageUrl,
                                 segment,
                               }) async {
                                 await provider.segmentNotification(

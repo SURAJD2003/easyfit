@@ -72,38 +72,43 @@ class AuthProvider extends ChangeNotifier {
     return prefs.getBool('cached_is_approved') ?? false;
   }
 
-  bool get needsSubscriptionPlan {
-    if (isApproved) return false;
-    if (_subscriptionRequest == null) return true;
-    
-    final plan = _subscriptionRequest!.plan.trim().toLowerCase();
-    final status = _subscriptionRequest!.status.trim().toLowerCase();
-    
-    if (plan.isEmpty || plan == 'none' || plan == 'null' || plan == 'free') {
-      return true;
-    }
-    
-    if (status == 'unknown' || status == 'free' || status.isEmpty) {
-      return true;
-    }
-    
-    return false;
-  }
-
   bool get isRejected {
     return _subscriptionRequest?.isRejected ?? false;
   }
 
   bool get isPending {
-    // If authenticated but we don't have status yet, assume pending
-    if (_subscriptionRequest == null && _userProfile == null) return true;
-    
     // If explicitly approved or rejected, it's not pending anymore
     if (isApproved || isRejected) return false;
     
-    // Otherwise, if status is 'pending' or 'free', it's pending approval
-    final s = _subscriptionRequest?.status.toLowerCase() ?? '';
-    return s == 'pending' || s == 'free' || s == '';
+    // Check if subscription request status is pending
+    if (_subscriptionRequest != null) {
+      final s = _subscriptionRequest!.status.trim().toLowerCase();
+      if (s == 'pending' || _subscriptionRequest!.isPending) return true;
+    }
+    
+    return false;
+  }
+
+  bool get needsSubscriptionPlan {
+    if (isApproved) return false;
+    if (isPending) return false; // Already submitted a request, waiting for admin approval
+    if (isRejected) return true; // Rejected users can pick a plan again
+    if (_subscriptionRequest == null) return true; // New user without any request
+    
+    final plan = _subscriptionRequest!.plan.trim().toLowerCase();
+    final status = _subscriptionRequest!.status.trim().toLowerCase();
+    
+    if (status == 'pending') return false;
+
+    if (plan.isEmpty || plan == 'none' || plan == 'null') {
+      return true;
+    }
+    
+    if (status == 'unknown' || status == 'none' || status.isEmpty) {
+      return true;
+    }
+    
+    return false;
   }
 
   AuthProvider() {
@@ -350,7 +355,9 @@ class AuthProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
     await prefs.remove('auth_refresh_token');
+    await prefs.remove('cached_is_approved');
     ApiClient().clearToken();
+    await PushNotificationService().clearTokenCache();
     
     notifyListeners();
   }

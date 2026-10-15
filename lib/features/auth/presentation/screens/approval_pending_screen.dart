@@ -5,8 +5,58 @@ import 'package:go_router/go_router.dart';
 import '../../../../providers/auth_provider.dart';
 import '../../../../core/router/route_names.dart';
 
-class ApprovalPendingScreen extends StatelessWidget {
+class ApprovalPendingScreen extends StatefulWidget {
   const ApprovalPendingScreen({super.key});
+
+  @override
+  State<ApprovalPendingScreen> createState() => _ApprovalPendingScreenState();
+}
+
+class _ApprovalPendingScreenState extends State<ApprovalPendingScreen> {
+  bool _isChecking = false;
+
+  Future<void> _checkApprovalStatus() async {
+    if (_isChecking) return;
+    setState(() => _isChecking = true);
+    try {
+      final authProvider = context.read<AuthProvider>();
+      await authProvider.fetchSubscriptionStatus();
+      await authProvider.fetchProfile();
+      
+      if (!mounted) return;
+
+      if (authProvider.isApproved) {
+        context.go(RouteNames.dashboard);
+      } else if (authProvider.isRejected) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Your request was rejected. Please try again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Account still pending approval'),
+            backgroundColor: Color(0xFF1A1A1A),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to check approval status. Please check your connection.'),
+            backgroundColor: Color(0xFF1A1A1A),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isChecking = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -107,31 +157,7 @@ class ApprovalPendingScreen extends StatelessWidget {
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton(
-                  onPressed: () async {
-                    final authProvider = context.read<AuthProvider>();
-                    await authProvider.fetchSubscriptionStatus();
-                    await authProvider.fetchProfile();
-                    
-                    if (!context.mounted) return;
-
-                    if (authProvider.isApproved) {
-                      context.go(RouteNames.dashboard);
-                    } else if (authProvider.isRejected) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Your request was rejected. Please try again.'),
-                          backgroundColor: Colors.red,
-                        ),
-                      );
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Account still pending approval'),
-                          backgroundColor: Color(0xFF1A1A1A),
-                        ),
-                      );
-                    }
-                  },
+                  onPressed: _isChecking ? null : _checkApprovalStatus,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: isRejected ? Colors.red : const Color(0xFFFF7A00),
                     shape: RoundedRectangleBorder(
@@ -139,14 +165,23 @@ class ApprovalPendingScreen extends StatelessWidget {
                     ),
                     elevation: 0,
                   ),
-                  child: Text(
-                    isRejected ? 'Check Status Again' : 'Check Approval Status',
-                    style: GoogleFonts.poppins(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                  ),
+                  child: _isChecking
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : Text(
+                          isRejected ? 'Check Status Again' : 'Check Approval Status',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
                 ),
               ),
               

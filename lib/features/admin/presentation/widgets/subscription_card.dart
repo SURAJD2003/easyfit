@@ -21,15 +21,8 @@ class SubscriptionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final isExpired = subscription.status == 'expired' ||
-        (subscription.expiryDate != null &&
-            subscription.expiryDate!.isBefore(today));
-    final isDue = !isExpired &&
-        (subscription.status == 'due' ||
-            (subscription.expiryDate != null &&
-                subscription.expiryDate!.difference(today).inDays <= 30));
+    final isExpired = subscription.isExpired;
+    final isDue = subscription.isDue;
 
     final badgeStatus = isExpired
         ? 'expired'
@@ -107,7 +100,9 @@ class SubscriptionCard extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: _InfoChip(
-                      label: isExpired ? 'Expired On' : 'Due Date',
+                      label: isExpired
+                          ? 'Expired On'
+                          : (isDue ? 'Due Date' : 'Expires On'),
                       value: _formatDate(subscription.expiryDate!),
                       highlight: isExpired || isDue,
                       highlightColor: isExpired

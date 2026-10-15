@@ -57,3 +57,29 @@ class SubscriptionEntity {
     this.history = const [],
   });
 }
+
+extension SubscriptionEntityX on SubscriptionEntity {
+  /// Returns true if the subscription status is 'expired' or if expiryDate has passed.
+  bool get isExpired {
+    final s = status.trim().toLowerCase();
+    if (s == 'expired') return true;
+    if (expiryDate != null) {
+      return expiryDate!.isBefore(DateTime.now());
+    }
+    return false;
+  }
+
+  /// Returns true if the subscription is due for renewal or marked as due,
+  /// but has NOT yet expired.
+  bool get isDue {
+    if (isExpired) return false;
+    final s = status.trim().toLowerCase();
+    if (s == 'due') return true;
+    if (expiryDate != null) {
+      final now = DateTime.now();
+      final diff = expiryDate!.difference(now).inDays;
+      return diff >= 0 && diff <= 30;
+    }
+    return false;
+  }
+}

@@ -128,36 +128,18 @@ class SubscriptionsState {
 
   List<SubscriptionEntity> getSubscriptionsForTab(String tabStatus) {
     var filtered = subscriptions;
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
 
     if (tabStatus != 'all') {
       final target = tabStatus.toLowerCase();
       if (target == 'expired') {
-        filtered = filtered.where((s) {
-          final isStatusExpired = s.status.toLowerCase() == 'expired';
-          final isDateExpired =
-              s.expiryDate != null && s.expiryDate!.isBefore(today);
-          return isStatusExpired || isDateExpired;
-        }).toList();
+        filtered = filtered.where((s) => s.isExpired).toList();
       } else if (target == 'due') {
-        filtered = filtered.where((s) {
-          // If already expired in the past, it belongs exclusively in 'Expired'
-          final isDateExpired =
-              s.expiryDate != null && s.expiryDate!.isBefore(today);
-          final isStatusExpired = s.status.toLowerCase() == 'expired';
-          if (isDateExpired || isStatusExpired) return false;
-
-          final isStatusDue = s.status.toLowerCase() == 'due';
-          final isUpcoming =
-              s.expiryDate != null && !s.expiryDate!.isBefore(today);
-
-          return isStatusDue || isUpcoming;
-        }).toList();
+        filtered = filtered.where((s) => s.isDue).toList();
       } else {
-        filtered = filtered
-            .where((s) => s.status.toLowerCase() == target)
-            .toList();
+        filtered = filtered.where((s) {
+          if (s.isExpired) return false;
+          return s.status.toLowerCase() == target;
+        }).toList();
       }
     }
     if (searchQuery.isNotEmpty) {
@@ -579,6 +561,23 @@ class AdminProvider extends ChangeNotifier {
       final Map<String, SubscriptionEntity> subMap = {};
       int autoIdCounter = 0;
 
+      String? findKey(String id, String userId) {
+        if (id.isNotEmpty && subMap.containsKey(id)) return id;
+        if (userId.isNotEmpty) {
+          for (final entry in subMap.entries) {
+            if (entry.value.userId == userId || entry.key == userId) {
+              return entry.key;
+            }
+          }
+        }
+        if (id.isNotEmpty) {
+          for (final entry in subMap.entries) {
+            if (entry.value.id == id) return entry.key;
+          }
+        }
+        return null;
+      }
+
       for (final s in regular) {
         final key = s.id.isNotEmpty
             ? s.id
@@ -589,18 +588,20 @@ class AdminProvider extends ChangeNotifier {
       try {
         final due = await repo.getDueSubscriptions();
         final now = DateTime.now();
-        final today = DateTime(now.year, now.month, now.day);
 
         for (final e in due) {
-          final key = e.id.isNotEmpty
-              ? e.id
-              : (e.userId.isNotEmpty ? e.userId : 'due_${autoIdCounter++}');
+          final key = findKey(e.id, e.userId) ??
+              (e.id.isNotEmpty
+                  ? e.id
+                  : (e.userId.isNotEmpty ? e.userId : 'due_${autoIdCounter++}'));
           final existing = subMap[key];
           final expDate = e.expiryDate ?? existing?.expiryDate;
-          final isExpiredDate = expDate != null && expDate.isBefore(today);
+          final isExp = e.isExpired ||
+              (existing != null && existing.isExpired) ||
+              (expDate != null && expDate.isBefore(now));
 
           subMap[key] = SubscriptionModel(
-            id: e.id.isNotEmpty ? e.id : key,
+            id: e.id.isNotEmpty ? e.id : (existing?.id ?? key),
             userId: e.userId.isNotEmpty ? e.userId : (existing?.userId ?? ''),
             userName: e.userName != 'Unknown User'
                 ? e.userName
@@ -609,7 +610,7 @@ class AdminProvider extends ChangeNotifier {
                 ? e.userEmail
                 : (existing?.userEmail ?? ''),
             plan: e.plan.isNotEmpty ? e.plan : (existing?.plan ?? 'free'),
-            status: isExpiredDate ? 'expired' : 'due',
+            status: isExp ? 'expired' : 'due',
             requestedAt: e.requestedAt ?? existing?.requestedAt,
             resolvedAt: e.resolvedAt ?? existing?.resolvedAt,
             expiryDate: expDate,
@@ -627,12 +628,13 @@ class AdminProvider extends ChangeNotifier {
       try {
         final expired = await repo.getExpiredSubscriptions();
         for (final e in expired) {
-          final key = e.id.isNotEmpty
-              ? e.id
-              : (e.userId.isNotEmpty ? e.userId : 'exp_${autoIdCounter++}');
+          final key = findKey(e.id, e.userId) ??
+              (e.id.isNotEmpty
+                  ? e.id
+                  : (e.userId.isNotEmpty ? e.userId : 'exp_${autoIdCounter++}'));
           final existing = subMap[key];
           subMap[key] = SubscriptionModel(
-            id: e.id.isNotEmpty ? e.id : key,
+            id: e.id.isNotEmpty ? e.id : (existing?.id ?? key),
             userId: e.userId.isNotEmpty ? e.userId : (existing?.userId ?? ''),
             userName: e.userName != 'Unknown User'
                 ? e.userName
@@ -656,13 +658,34 @@ class AdminProvider extends ChangeNotifier {
         debugPrint('Failed to fetch expired subscriptions: $e');
       }
 
+      // Final pass: Any subscription with an expired date is strictly marked 'expired'
+      final List<SubscriptionEntity> finalSubs = subMap.values.map((s) {
+        if (s.isExpired && s.status.toLowerCase() != 'expired') {
+          return SubscriptionModel(
+            id: s.id,
+            userId: s.userId,
+            userName: s.userName,
+            userEmail: s.userEmail,
+            plan: s.plan,
+            status: 'expired',
+            requestedAt: s.requestedAt,
+            resolvedAt: s.resolvedAt,
+            expiryDate: s.expiryDate,
+            note: s.note,
+            reason: s.reason,
+            history: s.history,
+          );
+        }
+        return s;
+      }).toList();
+
       _subscriptionsState = _subscriptionsState.copyWith(
-        subscriptions: subMap.values.toList(),
+        subscriptions: finalSubs,
         isLoading: false,
       );
     } catch (e) {
       _subscriptionsState = _subscriptionsState.copyWith(
-        error: _parseError(e),
+ ,       error: _parseError(e),
         isLoading: false,
       );
     }

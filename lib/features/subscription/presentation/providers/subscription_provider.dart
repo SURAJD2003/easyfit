@@ -140,13 +140,21 @@ class SubscriptionNotifier extends StateNotifier<SubscriptionState> {
     required String planId,
     required String planName,
   }) async {
+    if (state.isLoading) {
+      return false;
+    }
+    if (state.requestStatus?.isPending == true ||
+        state.requestStatus?.status.toLowerCase() == 'pending') {
+      return true;
+    }
+
     state = state.copyWith(isLoading: true, message: null);
     try {
       final res = await _dataSource.requestSubscription(
         planId: planId,
         planName: planName,
       );
-      PushNotificationService().registerTokenWithBackend(isAdmin: false);
+      await PushNotificationService().registerTokenWithBackend(isAdmin: false);
       state = state.copyWith(isLoading: false, message: res['message']);
       await fetchRequestStatus();
       return true;

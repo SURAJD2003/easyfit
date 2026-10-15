@@ -300,7 +300,8 @@ class AdminRemoteDataSource {
       body: jsonEncode({
         'title': title.trim(),
         'body': body.trim(),
-        'imageUrl': imageUrl?.trim() ?? '',
+        if (imageUrl != null && imageUrl.trim().isNotEmpty)
+          'imageUrl': imageUrl.trim(),
       }),
     );
     _handleError(res);

@@ -114,6 +114,20 @@ class PushNotificationService {
       FlutterLocalNotificationsPlugin();
 
   bool _isInitialized = false;
+  bool _isRegisteringToken = false;
+  String? _lastRegisteredFcmToken;
+  String? _lastRegisteredAuthToken;
+  String? _lastRegisteredRole;
+
+  Future<void> clearTokenCache() async {
+    _lastRegisteredFcmToken = null;
+    _lastRegisteredAuthToken = null;
+    _lastRegisteredRole = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('last_registered_fcm_token');
+    await prefs.remove('last_registered_auth_token');
+    await prefs.remove('last_registered_role');
+  }
 
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -160,7 +174,6 @@ class PushNotificationService {
           ?.createNotificationChannel(channel);
 
       // 3. Configure FCM foreground message handler
-      // 3. Configure FCM foreground message handler
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         debugPrint('Got a message whilst in the foreground: ${message.data}');
 
@@ -189,10 +202,12 @@ class PushNotificationService {
       final token = await _firebaseMessaging.getToken();
       debugPrint('FCM Token: $token');
 
-      // Check if admin is currently logged in and subscribe to topics
+      // Check if admin is currently logged in and subscribe/unsubscribe accordingly
       final prefs = await SharedPreferences.getInstance();
       if (prefs.getString('admin_token') != null) {
         await subscribeToAdminTopics();
+      } else {
+        await unsubscribeFromAdminTopics();
       }
 
       _isInitialized = true;
@@ -235,6 +250,12 @@ class PushNotificationService {
 
   Future<void> registerTokenWithBackend({bool isAdmin = false}) async {
     if (kIsWeb) return;
+    if (_isRegisteringToken) {
+      debugPrint('FCM token registration already in progress, skipping.');
+      return;
+    }
+
+    _isRegisteringToken = true;
     try {
       final token = await _firebaseMessaging.getToken();
       if (token == null) return;
@@ -244,19 +265,53 @@ class PushNotificationService {
       final authStr = prefs.getString('auth_token');
       final adminStr = prefs.getString('admin_token');
       final activeToken = isAdmin ? (adminStr ?? authStr) : (authStr ?? adminStr);
+      final role = (isAdmin || adminStr != null) ? 'admin' : 'user';
+
+      // Load cached registration values if memory is uninitialized
+      _lastRegisteredFcmToken ??= prefs.getString('last_registered_fcm_token');
+      _lastRegisteredAuthToken ??= prefs.getString('last_registered_auth_token');
+      _lastRegisteredRole ??= prefs.getString('last_registered_role');
+
+      // Deduplicate: If already registered with this exact token, auth token, and role, skip!
+      if (token == _lastRegisteredFcmToken &&
+          activeToken == _lastRegisteredAuthToken &&
+          role == _lastRegisteredRole) {
+        debugPrint('ℹ️ FCM token already registered with backend for this user/role. Skipping redundant call.');
+        return;
+      }
 
       if (activeToken != null) {
         dio.options.headers['Authorization'] = 'Bearer $activeToken';
       }
 
+      // If this device is acting as a regular user, ensure admin topics are unsubscribed
+      if (!isAdmin && adminStr == null) {
+        await unsubscribeFromAdminTopics();
+      }
+
       await dio.post('/notifications/register', data: {
         'fcmToken': token,
         'platform': Platform.operatingSystem,
-        'role': isAdmin || adminStr != null ? 'admin' : 'user',
+        'role': role,
       });
-      debugPrint('Successfully registered FCM token with backend (role: ${isAdmin || adminStr != null ? "admin" : "user"}).');
+
+      // Update in-memory and persistent cache on success
+      _lastRegisteredFcmToken = token;
+      _lastRegisteredAuthToken = activeToken;
+      _lastRegisteredRole = role;
+      await prefs.setString('last_registered_fcm_token', token);
+      if (activeToken != null) {
+        await prefs.setString('last_registered_auth_token', activeToken);
+      } else {
+        await prefs.remove('last_registered_auth_token');
+      }
+      await prefs.setString('last_registered_role', role);
+
+      debugPrint('Successfully registered FCM token with backend (role: $role).');
     } catch (e) {
       debugPrint('Failed to register FCM token with backend: $e');
+    } finally {
+      _isRegisteringToken = false;
     }
   }
 
