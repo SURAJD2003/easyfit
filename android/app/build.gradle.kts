@@ -32,7 +32,7 @@ android {
     defaultConfig {
         applicationId = "com.theeasyfitclinics.app"
         minSdk = flutter.minSdkVersion                                    // ✅ Fix 2 — must be 21+
-        targetSdk = 35
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true                         // ✅ Fix 3

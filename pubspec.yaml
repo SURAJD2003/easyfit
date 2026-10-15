@@ -1,7 +1,7 @@
 name: easyfit_clinics
 description: EasyFit Clinics — Premium Fitness Tracking App
 publish_to: 'none'
-version: 1.0.3+8
+version: 1.0.3+9
 
 environment:
   sdk: '>=3.11.0 <4.0.0'
@@ -40,9 +40,6 @@ dependencies:
 
   # Notifications
   flutter_local_notifications: ^18.0.1
-
-  # Payments
-  in_app_purchase: ^3.2.3
 
   # Charts
   fl_chart: ^0.69.2
