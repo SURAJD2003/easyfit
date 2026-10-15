@@ -685,7 +685,7 @@ class AdminProvider extends ChangeNotifier {
       );
     } catch (e) {
       _subscriptionsState = _subscriptionsState.copyWith(
- ,       error: _parseError(e),
+        error: _parseError(e),
         isLoading: false,
       );
     }
